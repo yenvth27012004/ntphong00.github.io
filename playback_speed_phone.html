@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+  <title>Playback Speed & Resolution Evaluation</title>
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background-color: #000;
+      width: 100vw;
+      height: 100dvh;
+      overflow: hidden;
+      touch-action: none; /* Prevents default browser scrolling on mobile */
+    }
+
+    /* --- Main Video Container --- */
+    #shorts-container {
+      /* Default PC Style: 9:16 aspect ratio centered */
+      height: 100dvh;
+      width: calc(100dvh * 9 / 16);
+      max-width: 100vw;
+      overflow: hidden;
+      position: fixed;
+      background: #000;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      box-shadow: 0 0 32px rgba(0,0,0,0.5);
+      z-index: 9999;
+      border-radius: 16px;
+    }
+
+    /* --- Smartphone / Mobile Optimization --- */
+    @media (max-width: 768px) {
+      #shorts-container {
+        width: 100%;       /* Force full width on mobile */
+        height: 100%;      /* Force full height */
+        max-width: none;
+        border-radius: 0;  /* Remove rounded corners on mobile */
+        box-shadow: none;
+      }
+    }
+
+    /* --- Video Items --- */
+    .short {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      transition: transform 0.4s ease;
+      z-index: 1; /* Videos are at level 1 */
+    }
+
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    /* --- Swipe Popup (New Styling) --- */
+    #swipe-popup {
+      display: none; /* Hidden by default, toggled by JS */
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%); /* Centers it perfectly */
+      z-index: 30000; /* Sits on TOP of the videos */
+      pointer-events: none; /* Allows user to swipe THROUGH the popup */
+      width: 100%;
+      height: 100%;
+      justify-content: center;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.4); /* Optional: darkens background slightly */
+    }
+
+    .popup-content {
+      background: rgba(0, 0, 0, 0.9);
+      padding: 20px 40px;
+      border-radius: 50px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+      text-align: center;
+      pointer-events: auto;
+    }
+
+    .popup-content b {
+      color: #ff0000;
+      font-size: 1.5rem;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+  <div id="shorts-container">
+  <div id="swipe-popup">
+    <div class="popup-content">
+      <b>scroll down</b>
+    </div>
+  </div>
+  </div>
+  <div id="start-page" style="position:fixed;inset:0;width:100vw;height:100dvh;background:#000;display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:10000;overflow:auto;">
+    <h1 style="color:#fff;margin-bottom:32px;">Main Evaluation</h1>
+    <div style="color:#fff;font-size:1.1rem;max-width:90vw;margin-bottom:32px;line-height:1.7;text-align:left;">
+      Please input your name, age, and experience with short video services.<br>
+      Then, click the "START" button to start the main evaluation.<br>
+      <br>
+      <!-- (Upload URL will be provided after the experiment) -->
+      <br>
+    </div>
+    <label style="color:#fff;font-size:1.2rem;margin-bottom:8px;" for="name-input">Your Name:</label>
+    <input id="name-input" type="text" required style="font-size:1.2rem;padding:8px 12px;border-radius:8px;border:none;margin-bottom:20px;width:200px;">
+
+    <label style="color:#fff;font-size:1.2rem;margin-bottom:8px;" for="age-input">Your Age:</label>
+    <input id="age-input" type="number" min="1" max="120" required style="font-size:1.2rem;padding:8px 12px;border-radius:8px;border:none;margin-bottom:20px;width:200px;">
+    <label style="color:#fff;font-size:1.2rem;margin-bottom:8px;" for="exp-input">Experience with short video services (years):</label>
+    <input id="exp-input" type="number" min="0" max="50" step="0.1" required style="font-size:1.2rem;padding:8px 12px;border-radius:8px;border:none;margin-bottom:32px;width:200px;">
+    <label style="color:#fff;font-size:1.2rem;margin-bottom:8px;" for="device-input">Device name:</label>
+    <input id="device-input" type="text" required style="font-size:1.2rem;padding:8px 12px;border-radius:8px;border:none;margin-bottom:32px;width:200px;">
+    <button id="start-btn" style="font-size:2rem;padding:16px 48px;border-radius:12px;border:none;background:#ff0000;color:#fff;cursor:pointer;">Start</button>
+  </div>
+  <div id="shorts-container" style="display:none;">
+    <!-- Shorts will be injected here -->
+  </div>
+  <div id="finish-page" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:20001;flex-direction:column;justify-content:center;align-items:center;">
+    <h1 style="color:#fff;margin-bottom:32px;">Thank you for participating!</h1>
+    <p style="color:#fff;font-size:1.2rem;margin-bottom:32px;">You have finished watching all videos.</p>
+    <button id="download-log-btn-finish" style="font-size:1.2rem;padding:12px 32px;border-radius:8px;border:none;background:#222;color:#fff;cursor:pointer;">Download Log</button>
+    <div style="margin-top:32px;color:#fff;font-size:1.1rem;text-align:center;">
+      Please upload your downloaded log file to:<br>
+      <a href="https://drive.google.com/drive/folders/1-eO-y5bfWuiZvojqYlE-Lh4KqgXEvAbs?usp=sharing" target="_blank" style="color:#4af;text-decoration:underline;">
+        https://drive.google.com/drive/folders/1-eO-y5bfWuiZvojqYlE-Lh4KqgXEvAbs?usp=sharing
+      </a>
+    </div>
+  </div>
+  <!-- Rest period screen -->
+  <div id="rest-page" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:30000;flex-direction:column;justify-content:center;align-items:center;">
+    <h1 style="color:#fff;margin-bottom:32px;">Rest Period</h1>
+    <p style="color:#fff;font-size:1.5rem;">Please take a 3-minute break.<br>After the break, press the resume button below to continue.</p>
+    <div id="rest-timer" style="color:#fff;font-size:2rem;margin-top:24px;"></div>
+    <button id="resume-btn" style="display:none;margin-top:32px;font-size:1.5rem;padding:16px 48px;border-radius:12px;border:none;background:#ff0000;color:#fff;cursor:pointer;">Resume</button>
+  </div>
+  <!-- Score / rating page -->
+<div id="score-page" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:20002;flex-direction:column;justify-content:center;align-items:center;">
+  <h1 style="color:#fff;margin-bottom:32px;text-align:center;">Voting</h1>
+
+  <div id="progress-bar-container" style="width:60vw;max-width:400px;height:24px;background:#222;border-radius:12px;overflow:hidden;margin-bottom:8px;">
+    <div id="progress-bar" style="height:100%;width:0%;background:#ff0000;transition:width 0.4s;"></div>
+  </div>
+  <div id="progress-text" style="color:#fff;font-size:1.1rem;margin-bottom:16px;text-align:center;">
+  </div>
+  <p style="color:#fff;font-size:1.2rem;margin-bottom:24px;text-align:center;">
+  Please rate the last test sample:
+  </p>
+  <form id="score-form" style="color:#fff;font-size:1.2rem;display:flex;flex-direction:column;align-items:center;">
+    <label><input type="radio" name="acr" value="5" required> 5: Excellent </label>
+    <label><input type="radio" name="acr" value="4"> 4: Good</label>
+    <label><input type="radio" name="acr" value="3"> 3: Fair</label>
+    <label><input type="radio" name="acr" value="2"> 2: Poor</label>
+    <label><input type="radio" name="acr" value="1"> 1: Bad</label>
+    <button id="next-btn"  type="submit" style="margin-top:24px;font-size:1.2rem;padding:12px 32px;border-radius:8px;border:none;background:#ce0909;color:#fff;cursor:pointer;">Next Test</button>
+  </form>
+</div>
+
+  <script>
+    // ======================================================================
+    // EXPERIMENT PARAMETERS — edit these to change the study design.
+    // ======================================================================
+
+    // The 6 fixed video IDs used in EVERY session (0-indexed; file name = ID+1).
+    const VIDEO_IDS = [90, 111, 114, 112, 93, 154];
+
+    // The 5 playback speeds tested.
+    const PLAYBACK_SPEEDS = [1.0, 0.9, 0.8, 0.7, 0.6];
+
+    // The 3 resolutions tested. Each key below must have a matching folder
+    // in RES_PATHS.
+    const RESOLUTIONS = ["720p", "360p", "240p"];
+
+    // Folder for each resolution (kept from the original video_resolution/
+    // folder layout — only the 3 resolutions above are actually used).
+    const RES_PATHS = {
+      "720p": "./video_resolution/720p/",
+      "480p": "./video_resolution/480p/",
+      "360p": "./video_resolution/360p/",
+      "240p": "./video_resolution/240p/",
+      "144p": "./video_resolution/144p/",
+      "96p":  "./video_resolution/96p/"
+    };
+
+    // How long (ms) each video plays before the "scroll down" popup appears.
+    const VIEW_TIME_MS = 8000;
+
+    // Show the 3-minute rest page after this many completed sessions.
+    // Set to null to disable the rest break entirely.
+    const REST_AFTER_SESSION = 8; // e.g. roughly halfway through 15 sessions
+
+    // ======================================================================
+    // SESSION CONDITIONS — 5 speeds × 3 resolutions = 15 unique combinations,
+    // generated once and shuffled once. This is the SINGLE SOURCE OF TRUTH
+    // for which speed/resolution is active in each session.
+    // ======================================================================
+
+    function buildSessionConditions() {
+      const conditions = [];
+      for (const speed of PLAYBACK_SPEEDS) {
+        for (const resolution of RESOLUTIONS) {
+          conditions.push({ speed, resolution });
+        }
+      }
+      return conditions;
+    }
+
+    function shuffleArray(arr) {
+      const a = arr.slice();
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    const SESSION_CONDITIONS = buildSessionConditions();      // 15 unique combos, fixed order
+    const shuffledConditions = shuffleArray(SESSION_CONDITIONS); // 15 combos, randomized once
+    const EVALUATION_REPEAT = shuffledConditions.length;      // = 15
+
+    console.log("Randomized session conditions:", shuffledConditions);
+    console.log("Total sessions:", EVALUATION_REPEAT, "| Speeds:", PLAYBACK_SPEEDS.length, "| Resolutions:", RESOLUTIONS.length);
+
+    // --- Logging utility ---
+    const logBuffer = [];
+    function logAndBuffer(...args) {
+      logBuffer.push(args.map(String).join(' '));
+      console.log(...args);
+    }
+
+    let swipeLocked = false;
+
+    // --- Start page logic ---
+    const startPage = document.getElementById('start-page');
+    // NOTE: the markup has two elements with id="shorts-container" (a legacy
+    // duplicate-id quirk from the original file). getElementById returns the
+    // FIRST one — the one that also holds #swipe-popup — which is the same
+    // element the original script used for all video insertion/display.
+    const shortsContainer = document.getElementById('shorts-container');
+    const finishPage = document.getElementById('finish-page');
+    const downloadLogBtnFinish = document.getElementById('download-log-btn-finish');
+    let userName = ""; // Store user name for log file
+
+    let evaluationCount = 0; // 0-indexed current session number
+
+    // --- Rest period logic ---
+    function showRestPage(callback) {
+      const restPage = document.getElementById('rest-page');
+      const resumeBtn = document.getElementById('resume-btn');
+      restPage.style.display = 'flex';
+      resumeBtn.style.display = 'none';
+      let seconds = 60 * 3;
+      const timerDiv = document.getElementById('rest-timer');
+      timerDiv.textContent = `Time left: ${seconds}s`;
+      const interval = setInterval(() => {
+        seconds--;
+        timerDiv.textContent = `Time left: ${seconds}s`;
+        if (seconds <= 0) {
+          clearInterval(interval);
+          resumeBtn.style.display = 'block';
+          resumeBtn.onclick = function() {
+            restPage.style.display = 'none';
+            resumeBtn.style.display = 'none';
+            if (callback) callback();
+          };
+        }
+      }, 1000);
+    }
+
+    // No artificial network delay is used in this experiment design
+    // (speed/resolution perception only). Kept as a function so the swipe
+    // transition code below (originally built for a delay-evaluation study)
+    // doesn't need to be rewritten.
+    function getCurrentDelay() {
+      return 0;
+    }
+
+    // GIF overlay for simulating delay (inactive while getCurrentDelay() = 0,
+    // kept in case a delay condition is reintroduced later).
+    const gifOverlay = document.createElement('div');
+    gifOverlay.style.position = 'fixed';
+    gifOverlay.style.top = 0;
+    gifOverlay.style.left = 0;
+    gifOverlay.style.width = '100vw';
+    gifOverlay.style.height = '100vh';
+    gifOverlay.style.background = '#000';
+    gifOverlay.style.zIndex = 99999;
+    gifOverlay.style.display = 'none';
+    gifOverlay.style.justifyContent = 'center';
+    gifOverlay.style.alignItems = 'center';
+    const gifImg = document.createElement('img');
+    gifImg.src = 'output.gif';
+    if (window.innerWidth < 768) {
+      gifImg.style.maxWidth = '100vw';
+      gifImg.style.maxHeight = '100vh';
+    } else {
+      gifImg.style.maxWidth = '30vw';
+      gifImg.style.maxHeight = '30vh';
+    }
+    gifImg.style.position = 'absolute';
+    gifImg.style.top = '50%';
+    gifImg.style.left = '50%';
+    gifImg.style.transform = 'translate(-50%, -50%)';
+    gifOverlay.appendChild(gifImg);
+    document.body.appendChild(gifOverlay);
+
+    function loadVideosWithFetch(videoObjs, callback) {
+      let loaded = 0;
+      const total = videoObjs.length;
+      const blobs = new Array(total);
+
+      videoObjs.forEach((video, idx) => {
+        fetch(video.src)
+          .then(res => res.blob())
+          .then(blob => {
+            blobs[idx] = URL.createObjectURL(blob);
+            loaded++;
+            console.log(`Video ${idx + 1}/${total} loaded: ${video.src}`);
+            if (loaded === total) callback(blobs);
+          })
+          .catch(() => {
+            console.error(`Error loading video ${idx + 1}/${total}: ${video.src}`);
+            blobs[idx] = video.src; // fall back to original URL on error
+            loaded++;
+            if (loaded === total) callback(blobs);
+          });
+      });
+    }
+
+    // ======================================================================
+    // SESSION VIDEO SELECTION
+    // The one and only place that decides which files to load for a session.
+    // Resolution comes from shuffledConditions[sessionIndex]; the 6 video IDs
+    // are always VIDEO_IDS (fixed, never randomized per session).
+    // ======================================================================
+    function getPredefinedVideos(sessionIndex) {
+      const condition = shuffledConditions[sessionIndex % shuffledConditions.length];
+      const folderPath = RES_PATHS[condition.resolution];
+      return VIDEO_IDS.map(vidIndex => ({
+        title: `Video ${vidIndex + 1}`,
+        src: `${folderPath}${vidIndex + 1}.mp4`
+      }));
+    }
+
+    // Fetches + inserts the 6 videos for a given session, and immediately
+    // applies that session's playback speed to all 6 <video> elements so
+    // there is no moment where a video plays at the wrong rate.
+    function renderSessionVideos(sessionIndex, onComplete) {
+      const condition = shuffledConditions[sessionIndex % shuffledConditions.length];
+      const videos = getPredefinedVideos(sessionIndex);
+
+      loadVideosWithFetch(videos, function(blobUrls) {
+        const oldShorts = shortsContainer.querySelectorAll('.short');
+        oldShorts.forEach(el => el.remove());
+
+        const videoHTML = videos.map((video, idx) => `
+          <div class="short" style="transform: translateY(${idx * 100}%);">
+            <video
+              src="${blobUrls[idx]}"
+              playsinline
+              preload="auto"
+              autoplay
+              muted
+              style="width:100%;height:100%;background:#000;object-fit:cover;"
+            ></video>
+            <div style="position:absolute;bottom:16px;left:16px;color:#fff;font-size:1.2rem;text-shadow:0 0 8px #000;"></div>
+          </div>
+        `).join('');
+
+        shortsContainer.insertAdjacentHTML('beforeend', videoHTML);
+
+        // Apply this session's playback speed to all 6 videos right away.
+        shortsContainer.querySelectorAll('.short video').forEach(v => {
+          v.playbackRate = condition.speed;
+        });
+
+        if (onComplete) onComplete();
+      });
+    }
+
+    const startBtn = document.getElementById('start-btn');
+    startBtn.disabled = true;
+    startBtn.style.opacity = '0.5';
+
+    // Preload session 1 (index 0) before the participant can press Start.
+    renderSessionVideos(evaluationCount, function() {
+      startBtn.disabled = false;
+      startBtn.style.opacity = '1';
+    });
+
+    document.getElementById('start-btn').onclick = function() {
+      clearTimeout(window._swipePopupTimeout);
+      document.getElementById('swipe-popup').style.display = 'none';
+
+      const name = document.getElementById('name-input').value.trim();
+      const age = document.getElementById('age-input').value.trim();
+      const exp = document.getElementById('exp-input').value.trim();
+      const device = document.getElementById('device-input').value.trim();
+
+      if (!name || !age || !exp || !device) {
+        alert('Please input your name, age, experience, and device name before starting.');
+        return;
+      }
+
+      userName = name || "user";
+      logAndBuffer('User Name:', name);
+      logAndBuffer('User Age:', age);
+      logAndBuffer('Experience (years):', exp);
+      logAndBuffer('Device Name:', device);
+
+      startPage.style.display = 'none';
+      shortsContainer.style.display = '';
+
+      restartPlayback();
+      setTimeout(() => {
+        playCurrentVideo();
+      }, 0);
+    };
+
+    // Resets playback state and (re)shows the current session's videos.
+    // NOTE: this does NOT reload the videos from disk — those are already
+    // preloaded either by the initial renderSessionVideos() call above, or
+    // by the preload triggered inside showFinishPage() for the next session.
+    function restartPlayback() {
+      currentIndex = 0;
+      playTimes = Array(VIDEO_IDS.length).fill(0);
+      shortsContainer.style.display = '';
+      finishPage.style.display = 'none';
+      scorePage.style.display = 'none';
+
+      shorts = document.querySelectorAll('.short');
+      playStart = Date.now();
+      updateShorts();
+
+      const condition = shuffledConditions[evaluationCount];
+      console.log("Current session:", evaluationCount + 1, "/", EVALUATION_REPEAT);
+      console.log("Current playback speed:", condition.speed);
+      console.log("Current resolution:", condition.resolution);
+      console.log("Current videos:", VIDEO_IDS);
+      logAndBuffer(`--- Starting Session ${evaluationCount + 1}/${EVALUATION_REPEAT} | Speed: ${condition.speed}x | Resolution: ${condition.resolution} ---`);
+    }
+
+    // Called when the participant finishes the 6th video of a session:
+    // hides the shorts, shows the score/rating page, and preloads the next
+    // session's videos in the background (if there is one).
+    function showFinishPage() {
+      shortsContainer.style.display = 'none';
+      scorePage.style.display = 'flex';
+      shorts.forEach((short) => {
+        const video = short.querySelector('video');
+        try {
+          video.pause();
+          video.muted = true;
+        } catch (e) {}
+      });
+
+      scorePage.querySelector('h1').innerHTML = `Video Quality Evaluation (Session ${evaluationCount + 1} / ${EVALUATION_REPEAT})`;
+      updateProgressBar();
+
+      setTimeout(() => {
+        scorePage.style.display = 'flex';
+        shortsContainer.style.display = 'none';
+        window.scrollTo(0, 1);
+        window.scrollTo(0, 0);
+      }, 50);
+
+      const nextBtn = document.getElementById('next-btn');
+      const nextSessionIndex = evaluationCount + 1;
+
+      if (nextSessionIndex < EVALUATION_REPEAT) {
+        nextBtn.disabled = true;
+        nextBtn.style.opacity = '0.5';
+        renderSessionVideos(nextSessionIndex, function() {
+          nextBtn.disabled = false;
+          nextBtn.style.opacity = '1';
+        });
+      } else {
+        // Last session — nothing more to preload.
+        nextBtn.disabled = false;
+        nextBtn.style.opacity = '1';
+      }
+    }
+
+    function updateProgressBar() {
+      const percent = Math.round(((evaluationCount + 1) / EVALUATION_REPEAT) * 100);
+      document.getElementById('progress-bar').style.width = percent + '%';
+      document.getElementById('progress-text').innerHTML =
+        `${evaluationCount + 1} / ${EVALUATION_REPEAT} Complete`;
+    }
+
+    // --- Score page submit handler ---
+    const scorePage = document.getElementById('score-page');
+    const scoreForm = document.getElementById('score-form');
+    scoreForm.onsubmit = function(e) {
+      e.preventDefault();
+      const acr = scoreForm.elements['acr'].value;
+      const condition = shuffledConditions[evaluationCount];
+
+      // Log everything needed to analyze speed/resolution/score later,
+      // without having to infer the condition from the session's position.
+      logAndBuffer(`Session: ${evaluationCount + 1}`);
+      logAndBuffer(`Playback Speed: ${condition.speed}x`);
+      logAndBuffer(`Resolution: ${condition.resolution}`);
+      logAndBuffer(`Videos: ${VIDEO_IDS.join(',')}`);
+      logAndBuffer(`ACR Score: ${acr}`);
+
+      evaluationCount++;
+      scoreForm.reset();
+
+      if (REST_AFTER_SESSION !== null && evaluationCount === REST_AFTER_SESSION) {
+        scorePage.style.display = 'none';
+        showRestPage(() => {
+          restartPlayback();
+          setTimeout(() => {
+            playCurrentVideo();
+          }, 0);
+        });
+        return;
+      }
+
+      if (evaluationCount < EVALUATION_REPEAT) {
+        restartPlayback();
+        setTimeout(() => {
+          playCurrentVideo();
+        }, 0);
+      } else {
+        scorePage.style.display = 'none';
+        finishPage.style.display = 'flex';
+      }
+    };
+
+    downloadLogBtnFinish.onclick = function() {
+      const safeName = userName.replace(/[^a-zA-Z0-9_\-]/g, "_");
+      const now = new Date();
+      const pad = n => n.toString().padStart(2, '0');
+      const dateStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      const blob = new Blob([logBuffer.join('\n')], {type: 'text/plain'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `log_speed_resolution_${safeName}_${dateStr}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+
+    var shorts = document.querySelectorAll('.short');
+    let currentIndex = 0;
+    let startY = 0;
+    let isTouch = false;
+
+    // --- Play time tracking ---
+    var playTimes = Array(VIDEO_IDS.length).fill(0); // ms
+    let playStart = Date.now();
+
+    function logPlayTime(index) {
+      const now = Date.now();
+      playTimes[index] += now - playStart;
+      logAndBuffer(
+        `Video ${index} (${VIDEO_IDS[index]}) play time: ${playTimes[index] / 1000}s`
+      );
+      playStart = now;
+    }
+
+    // --- Touch events (mobile & touchpad) ---
+    document.addEventListener('touchstart', (e) => {
+      if (
+        startPage.style.display !== "none" ||
+        scorePage.style.display !== "none" ||
+        finishPage.style.display !== "none"
+      ) return;
+      logAndBuffer('Touch start detected');
+      isTouch = true;
+      startY = e.touches[0].clientY;
+    });
+
+    document.addEventListener('touchend', (e) => {
+      if (
+        startPage.style.display !== "none" ||
+        scorePage.style.display !== "none" ||
+        finishPage.style.display !== "none"
+      ) return;
+      if (!isTouch) return;
+      const endY = e.changedTouches[0].clientY;
+      if (endY - startY > 0) {
+        handleSwipe(-100);
+        logAndBuffer('Swipe down detected');
+      } else {
+        handleSwipe(100);
+        logAndBuffer('Swipe up detected');
+      }
+    });
+
+    // Mouse events (touchpad swipe)
+    let mouseDown = false;
+    let mouseStartY = 0;
+    document.addEventListener('mousedown', (e) => {
+      if (startPage.style.display !== "none" || finishPage.style.display !== "none") return;
+      isTouch = false;
+      mouseDown = true;
+      mouseStartY = e.clientY;
+    });
+
+    document.addEventListener('mouseup', (e) => {
+      if (startPage.style.display !== "none" || finishPage.style.display !== "none") return;
+      if (!mouseDown) return;
+      mouseDown = false;
+      const deltaY = e.clientY - mouseStartY;
+      handleSwipe(deltaY);
+    });
+
+    // Wheel event (for mouse scroll/touchpad swipe)
+    let wheelLocked = false;
+    document.addEventListener('wheel', function(e) {
+      if (finishPage.style.display !== "none") return;
+      if (startPage.style.display !== "none") return;
+      if (isTouch) return;
+      if (mouseDown) return;
+      if (wheelLocked) return;
+      if (e.deltaY < -20) {
+        handleSwipe(100);
+        wheelLocked = true;
+        setTimeout(() => { wheelLocked = false; }, 400);
+        e.preventDefault();
+      } else if (e.deltaY > 20) {
+        handleSwipe(-100);
+        wheelLocked = true;
+        setTimeout(() => { wheelLocked = false; }, 400);
+        e.preventDefault();
+      }
+    }, { passive: false });
+
+    // Keyboard events for up/down arrow keys
+    document.addEventListener('keydown', (e) => {
+      if (startPage.style.display !== "none" || finishPage.style.display !== "none") return;
+      if (e.key === 'ArrowDown') {
+        handleSwipe(-100);
+      } else if (e.key === 'ArrowUp') {
+        handleSwipe(100);
+      }
+    });
+
+    function updateShorts() {
+      if (
+        startPage.style.display !== "none" ||
+        finishPage.style.display !== "none"
+      ) {
+        shorts.forEach((short) => {
+          const video = short.querySelector('video');
+          if (!video.paused) video.pause();
+          video.currentTime = 0;
+          video.onclick = null;
+        });
+        clearTimeout(window._swipePopupTimeout);
+        document.getElementById('swipe-popup').style.display = 'none';
+        return;
+      }
+
+      const condition = shuffledConditions[evaluationCount];
+      shorts.forEach((short, index) => {
+        short.style.transform = `translateY(${(index - currentIndex) * 100}%)`;
+        const video = short.querySelector('video');
+        if (index === currentIndex) {
+          video.currentTime = 0;
+          video.muted = true;
+          if (condition) video.playbackRate = condition.speed;
+        } else {
+          video.pause();
+          video.currentTime = 0;
+          video.onclick = null;
+        }
+      });
+      playStart = Date.now();
+    }
+
+    function playCurrentVideo() {
+      const video = shorts[currentIndex]?.querySelector('video');
+      const condition = shuffledConditions[evaluationCount];
+      const roundViewTime = VIEW_TIME_MS;
+
+      if (video) {
+        video.muted = true;
+        if (condition) video.playbackRate = condition.speed;
+
+        var playPromise = video.play();
+        if (playPromise !== undefined) {
+          playPromise.then(_ => {
+            video.muted = true;
+            if (condition) video.playbackRate = condition.speed;
+          }).catch(error => {
+            console.log("Autoplay blocked. Forcing mute play.");
+            video.muted = true;
+            video.play();
+          });
+        }
+
+        setTimeout(() => {
+          if (video.paused) {
+            video.muted = true;
+            video.play();
+          }
+          if (condition) video.playbackRate = condition.speed;
+        }, 50);
+
+        if (
+          startPage.style.display === "none" &&
+          finishPage.style.display === "none" &&
+          (typeof scorePage === 'undefined' || scorePage.style.display === "none")
+        ) {
+          clearTimeout(window._swipePopupTimeout);
+          document.getElementById('swipe-popup').style.display = 'none';
+          swipeLocked = true;
+
+          if (typeof roundViewTime === 'number' && !isNaN(roundViewTime)) {
+            window._swipePopupTimeout = setTimeout(() => {
+              document.getElementById('swipe-popup').style.display = 'flex';
+              swipeLocked = false;
+            }, roundViewTime);
+          }
+        }
+      }
+    }
+
+    function handleSwipe(deltaY) {
+      if (swipeLocked) return;
+      clearTimeout(window._swipePopupTimeout);
+      document.getElementById('swipe-popup').style.display = 'none';
+
+      if (isTouch) {
+        deltaY = -deltaY;
+      } else if (mouseDown) {
+        deltaY = -deltaY;
+      }
+
+      if (Math.abs(deltaY) > 5) {
+        const delay = getCurrentDelay();
+
+        // --- SWIPE DOWN (Next Video) ---
+        if (deltaY < 0 && currentIndex < shorts.length - 1) {
+          logPlayTime(currentIndex);
+          currentIndex++;
+
+          if (delay > 0) {
+            gifOverlay.style.display = 'flex';
+            updateShorts();
+            setTimeout(() => {
+              gifOverlay.style.display = 'none';
+              playCurrentVideo();
+            }, delay);
+          } else {
+            updateShorts();
+            playCurrentVideo();
+          }
+
+        // --- SWIPE UP (Previous Video) ---
+        } else if (deltaY > 0 && currentIndex > 0) {
+          logPlayTime(currentIndex);
+          currentIndex--;
+
+          if (delay > 0) {
+            gifOverlay.style.display = 'flex';
+            updateShorts();
+            setTimeout(() => {
+              gifOverlay.style.display = 'none';
+              playCurrentVideo();
+            }, delay);
+          } else {
+            updateShorts();
+            playCurrentVideo();
+          }
+
+        // --- LAST VIDEO (go to score page) ---
+        } else if (deltaY < 0 && currentIndex === shorts.length - 1) {
+          logPlayTime(currentIndex);
+          if (delay > 0) {
+            gifOverlay.style.display = 'flex';
+            setTimeout(() => {
+              gifOverlay.style.display = 'none';
+              showFinishPage();
+            }, delay);
+          } else {
+            showFinishPage();
+          }
+        }
+      }
+    }
+
+    // Log play time when user leaves the page
+    window.addEventListener('beforeunload', () => {
+      logPlayTime(currentIndex);
+      playTimes.forEach((t, i) => {
+        logAndBuffer(`Final Video ${i} play time: ${t / 1000}s`);
+      });
+    });
+  </script>
+</body>
+</html>
