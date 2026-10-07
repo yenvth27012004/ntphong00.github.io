@@ -143,7 +143,7 @@
   <!-- Rest period screen -->
   <div id="rest-page" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:30000;flex-direction:column;justify-content:center;align-items:center;">
     <h1 style="color:#fff;margin-bottom:32px;">Rest Period</h1>
-    <p style="color:#fff;font-size:1.5rem;">Please take a 3-minute break.<br>After the break, press the resume button below to continue.</p>
+    <p style="color:#fff;font-size:1.5rem;">Please take a 1-minute break.<br>After the break, press the resume button below to continue.</p>
     <div id="rest-timer" style="color:#fff;font-size:2rem;margin-top:24px;"></div>
     <button id="resume-btn" style="display:none;margin-top:32px;font-size:1.5rem;padding:16px 48px;border-radius:12px;border:none;background:#ff0000;color:#fff;cursor:pointer;">Resume</button>
   </div>
@@ -170,15 +170,12 @@
 </div>
 
   <script>
-    // ======================================================================
-    // EXPERIMENT PARAMETERS — edit these to change the study design.
-    // ======================================================================
 
     // The 6 fixed video IDs used in EVERY session (0-indexed; file name = ID+1).
     const VIDEO_IDS = [90, 111, 114, 112, 93, 154];
 
     // The 5 playback speeds tested.
-    const PLAYBACK_SPEEDS = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5];
+    const PLAYBACK_SPEEDS = [2.0, 1.5, 1.0, 0.9, 0.8, 0.7, 0.6, 0.5];
 
     // The 3 resolutions tested. Each key below must have a matching folder
     // in RES_PATHS.
@@ -202,11 +199,6 @@
     // Set to null to disable the rest break entirely.
     const REST_AFTER_SESSION = 8; // e.g. roughly halfway through 15 sessions
 
-    // ======================================================================
-    // SESSION CONDITIONS — 5 speeds × 3 resolutions = 15 unique combinations,
-    // generated once and shuffled once. This is the SINGLE SOURCE OF TRUTH
-    // for which speed/resolution is active in each session.
-    // ======================================================================
 
     function buildSessionConditions() {
       const conditions = [];
@@ -262,7 +254,7 @@
       const resumeBtn = document.getElementById('resume-btn');
       restPage.style.display = 'flex';
       resumeBtn.style.display = 'none';
-      let seconds = 60 * 3;
+      let seconds = 5;
       const timerDiv = document.getElementById('rest-timer');
       timerDiv.textContent = `Time left: ${seconds}s`;
       const interval = setInterval(() => {
@@ -340,12 +332,6 @@
       });
     }
 
-    // ======================================================================
-    // SESSION VIDEO SELECTION
-    // The one and only place that decides which files to load for a session.
-    // Resolution comes from shuffledConditions[sessionIndex]; the 6 video IDs
-    // are always VIDEO_IDS (fixed, never randomized per session).
-    // ======================================================================
     function getPredefinedVideos(sessionIndex) {
       const condition = shuffledConditions[sessionIndex % shuffledConditions.length];
       const folderPath = RES_PATHS[condition.resolution];
