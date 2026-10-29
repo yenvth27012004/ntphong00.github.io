@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
-  <title>Playback Speed & Resolution Evaluation</title>
+  <title>Quality, Stall, Packet Loss & Playback Speed Evaluation</title>
 
   <style>
     html, body {
@@ -48,71 +48,66 @@
       }
     }
 
-    /* --- Video Items --- */
+    /* --- Video Item (one clip = base video + optional lower-quality overlay video) --- */
     .short {
       width: 100%;
       height: 100%;
       position: absolute;
       top: 0;
       left: 0;
-      transition: transform 0.4s ease;
-      z-index: 1; /* Videos are at level 1 */
+      z-index: 1;
+      visibility: hidden; /* shown by JS only when the clip starts */
     }
 
-    video {
+    .short video {
+      position: absolute;
+      top: 0;
+      left: 0;
       width: 100%;
       height: 100%;
       object-fit: cover;
       display: block;
+      background: #000;
     }
 
-    /* --- Swipe Popup (New Styling) --- */
-    #swipe-popup {
-      display: none; /* Hidden by default, toggled by JS */
+    /* --- Buffering spinner (used for the mid-clip stall AND the start-up delay) --- */
+    #stall-spinner {
+      display: none;
       position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%); /* Centers it perfectly */
-      z-index: 30000; /* Sits on TOP of the videos */
-      pointer-events: none; /* Allows user to swipe THROUGH the popup */
-      width: 100%;
-      height: 100%;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      z-index: 5;
       justify-content: center;
       align-items: center;
-      background: rgba(0, 0, 0, 0.4); /* Optional: darkens background slightly */
+      pointer-events: none;
     }
-
-    .popup-content {
-      background: rgba(0, 0, 0, 0.9);
-      padding: 20px 40px;
-      border-radius: 50px;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-      text-align: center;
-      pointer-events: auto;
+    .spinner {
+      width: 56px;
+      height: 56px;
+      border: 6px solid rgba(255,255,255,0.35);
+      border-top-color: #ffffff;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
     }
-
-    .popup-content b {
-      color: #ff0000;
-      font-size: 1.5rem;
-      text-transform: uppercase;
-    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-  <div id="shorts-container">
-  <div id="swipe-popup">
-    <div class="popup-content">
-      <b>scroll down</b>
-    </div>
+
+  <!-- Video stage -->
+  <div id="shorts-container" style="display:none;">
+    <div id="stall-spinner"><div class="spinner"></div></div>
+    <!-- Clips will be injected here -->
   </div>
-  </div>
+
+  <!-- Start page -->
   <div id="start-page" style="position:fixed;inset:0;width:100vw;height:100dvh;background:#000;display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:10000;overflow:auto;">
     <h1 style="color:#fff;margin-bottom:32px;">Main Evaluation</h1>
     <div style="color:#fff;font-size:1.1rem;max-width:90vw;margin-bottom:32px;line-height:1.7;text-align:left;">
       Please input your name, age, and experience with short video services.<br>
       Then, click the "START" button to start the main evaluation.<br>
-      <br>
-      <!-- (Upload URL will be provided after the experiment) -->
+      The test has 2 sessions. After each video ends, a rating form appears immediately.<br>
+      Some videos may start with a loading screen, freeze for a moment, play slower, look blurry, or show glitches. Please rate your overall viewing experience of each video.<br>
       <br>
     </div>
     <label style="color:#fff;font-size:1.2rem;margin-bottom:8px;" for="name-input">Your Name:</label>
@@ -124,11 +119,12 @@
     <input id="exp-input" type="number" min="0" max="50" step="0.1" required style="font-size:1.2rem;padding:8px 12px;border-radius:8px;border:none;margin-bottom:32px;width:200px;">
     <label style="color:#fff;font-size:1.2rem;margin-bottom:8px;" for="device-input">Device name:</label>
     <input id="device-input" type="text" required style="font-size:1.2rem;padding:8px 12px;border-radius:8px;border:none;margin-bottom:32px;width:200px;">
+    <!-- Shown only if some video file could not be preloaded (wrong path / missing file) -->
+    <div id="load-warning" style="display:none;color:#ff6b6b;font-size:0.9rem;max-width:90vw;margin-bottom:16px;text-align:center;word-break:break-all;"></div>
     <button id="start-btn" style="font-size:2rem;padding:16px 48px;border-radius:12px;border:none;background:#ff0000;color:#fff;cursor:pointer;">Start</button>
   </div>
-  <div id="shorts-container" style="display:none;">
-    <!-- Shorts will be injected here -->
-  </div>
+
+  <!-- Finish page -->
   <div id="finish-page" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:20001;flex-direction:column;justify-content:center;align-items:center;">
     <h1 style="color:#fff;margin-bottom:32px;">Thank you for participating!</h1>
     <p style="color:#fff;font-size:1.2rem;margin-bottom:32px;">You have finished watching all videos.</p>
@@ -140,49 +136,71 @@
       </a>
     </div>
   </div>
-  <!-- Rest period screen -->
+
+  <!-- Rest period screen (between the 2 big sessions) -->
   <div id="rest-page" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:30000;flex-direction:column;justify-content:center;align-items:center;">
     <h1 style="color:#fff;margin-bottom:32px;">Rest Period</h1>
-    <p style="color:#fff;font-size:1.5rem;">Please take a 1-minute break.<br>After the break, press the resume button below to continue.</p>
+    <p id="rest-msg" style="color:#fff;font-size:1.5rem;text-align:center;"></p>
     <div id="rest-timer" style="color:#fff;font-size:2rem;margin-top:24px;"></div>
     <button id="resume-btn" style="display:none;margin-top:32px;font-size:1.5rem;padding:16px 48px;border-radius:12px;border:none;background:#ff0000;color:#fff;cursor:pointer;">Resume</button>
   </div>
-  <!-- Score / rating page -->
-<div id="score-page" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:20002;flex-direction:column;justify-content:center;align-items:center;">
-  <h1 style="color:#fff;margin-bottom:32px;text-align:center;">Voting</h1>
 
-  <div id="progress-bar-container" style="width:60vw;max-width:400px;height:24px;background:#222;border-radius:12px;overflow:hidden;margin-bottom:8px;">
-    <div id="progress-bar" style="height:100%;width:0%;background:#ff0000;transition:width 0.4s;"></div>
+  <!-- Score / rating page (shown right after EVERY video) -->
+  <div id="score-page" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:20002;flex-direction:column;justify-content:center;align-items:center;">
+    <h1 style="color:#fff;margin-bottom:32px;text-align:center;">Voting</h1>
+
+    <div id="progress-bar-container" style="width:60vw;max-width:400px;height:24px;background:#222;border-radius:12px;overflow:hidden;margin-bottom:8px;">
+      <div id="progress-bar" style="height:100%;width:0%;background:#ff0000;transition:width 0.4s;"></div>
+    </div>
+    <div id="progress-text" style="color:#fff;font-size:1.1rem;margin-bottom:16px;text-align:center;">
+    </div>
+    <p style="color:#fff;font-size:1.2rem;margin-bottom:24px;text-align:center;">
+      Please rate the last test sample:
+    </p>
+    <form id="score-form" style="color:#fff;font-size:1.2rem;display:flex;flex-direction:column;align-items:center;">
+      <label><input type="radio" name="acr" value="5" required> 5: Excellent </label>
+      <label><input type="radio" name="acr" value="4"> 4: Good</label>
+      <label><input type="radio" name="acr" value="3"> 3: Fair</label>
+      <label><input type="radio" name="acr" value="2"> 2: Poor</label>
+      <label><input type="radio" name="acr" value="1"> 1: Bad</label>
+      <button id="next-btn" type="submit" style="margin-top:24px;font-size:1.2rem;padding:12px 32px;border-radius:8px;border:none;background:#ce0909;color:#fff;cursor:pointer;">Next Test</button>
+    </form>
   </div>
-  <div id="progress-text" style="color:#fff;font-size:1.1rem;margin-bottom:16px;text-align:center;">
-  </div>
-  <p style="color:#fff;font-size:1.2rem;margin-bottom:24px;text-align:center;">
-  Please rate the last test sample:
-  </p>
-  <form id="score-form" style="color:#fff;font-size:1.2rem;display:flex;flex-direction:column;align-items:center;">
-    <label><input type="radio" name="acr" value="5" required> 5: Excellent </label>
-    <label><input type="radio" name="acr" value="4"> 4: Good</label>
-    <label><input type="radio" name="acr" value="3"> 3: Fair</label>
-    <label><input type="radio" name="acr" value="2"> 2: Poor</label>
-    <label><input type="radio" name="acr" value="1"> 1: Bad</label>
-    <button id="next-btn"  type="submit" style="margin-top:24px;font-size:1.2rem;padding:12px 32px;border-radius:8px;border:none;background:#ce0909;color:#fff;cursor:pointer;">Next Test</button>
-  </form>
-</div>
 
   <script>
 
-    // The 6 fixed video IDs used in EVERY session (0-indexed; file name = ID+1).
-    const VIDEO_IDS = [90, 111, 114, 112, 93, 154];
 
-    // The 5 playback speeds tested.
-    const PLAYBACK_SPEEDS = [2.0, 1.5, 1.0, 0.9, 0.8, 0.7, 0.6, 0.5];
+    // 6 fixed video IDs (0-indexed; file name = ID+1).
+    // Big session 1 = first 3 videos, big session 2 = last 3 videos.
+    const VIDEO_IDS = [90, 111, 114, 112, 93, 154];   // -> files 91, 112, 115, 113, 94, 155
+    const VIDEOS_PER_SESSION = 3;
 
-    // The 3 resolutions tested. Each key below must have a matching folder
-    // in RES_PATHS.
-    const RESOLUTIONS = ["720p", "360p", "240p"];
+    // Each source video is exactly 10 s: [0-3s] perfect | [3-7s] impaired | [7-10s] perfect
+    const CLIP_DURATION = 10;
+    const HEAD_END      = 3;   // end of the first perfect part (s of source time)
+    const TAIL_START    = 7;   // start of the last perfect part (s of source time)
+    const STALL_AT      = 5;   // source time at which the mid-clip stall freezes the video (centre of the 4 s middle)
+    const SHOW_STALL_SPINNER   = true; // spinner while the video is frozen in the middle of the clip
+    const SHOW_STARTUP_SPINNER = true; // spinner on the black screen before the video starts
 
-    // Folder for each resolution (kept from the original video_resolution/
-    // folder layout — only the 3 resolutions above are actually used).
+    // Perfect reference settings (used for the first 3 s, the last 3 s, and the PERFECT case)
+    const BASE_RES = "720p";
+
+    // Factors tested in the 4 s middle part
+    const QUALITIES        = ["720p", "480p", "240p"];       // quality in the middle part
+    const STALL_TIMES      = [0.5, 1, 2];                    // seconds of freeze in the middle of the clip
+    const PLAYBACK_SPEEDS  = [0.9, 0.8, 0.7, 0.6, 0.5];     // speed in the middle part
+
+    // NEW: packet-loss versions. The loss is already baked into the files (loss only in the middle 4 s).
+    // Files: LOSS_PATH + (videoId+1) + "_L" + level + ".mp4"   e.g. ./video_resolution/loss/91_L2.mp4
+    const LOSS_LEVELS  = [1, 2, 3];
+    const LOSS_NOMINAL = { 1: "0.1%", 2: "0.5%", 3: "1.0%" };  // nominal loss rate inside the lossy 4 s (only used for the log)
+    const LOSS_PATH    = "./video_resolution/loss/";
+
+    // NEW: start-up (initial buffering) delay when the video is opened: black screen + spinner, then the video plays normally
+    const STARTUP_DELAYS = [0.5, 1, 2];                       // seconds of black screen before the video starts
+
+    // Folder for each resolution. Each folder must contain the 10 s version of every video.
     const RES_PATHS = {
       "720p": "./video_resolution/720p/",
       "480p": "./video_resolution/480p/",
@@ -192,22 +210,19 @@
       "96p":  "./video_resolution/96p/"
     };
 
-    // How long (ms) each video plays before the "scroll down" popup appears.
-    const VIEW_TIME_MS = 8000;
+    // Rest between the 2 big sessions (seconds)
+    const REST_SECONDS = 30;
 
-    // Show the 3-minute rest page after this many completed sessions.
-    // Set to null to disable the rest break entirely.
-    const REST_AFTER_SESSION = 8; // e.g. roughly halfway through 15 sessions
-
-
-    function buildSessionConditions() {
-      const conditions = [];
-      for (const speed of PLAYBACK_SPEEDS) {
-        for (const resolution of RESOLUTIONS) {
-          conditions.push({ speed, resolution });
-        }
-      }
-      return conditions;
+    function buildConditions() {
+      const c = [];
+      const base = { res: BASE_RES, speed: 1, stall: 0, startDelay: 0, loss: 0 };
+      QUALITIES.forEach(q => c.push(Object.assign({}, base, { id: `Q_${q}`, type: 'quality', res: q })));
+      STALL_TIMES.forEach(t => c.push(Object.assign({}, base, { id: `T_${t}s`, type: 'stall', stall: t })));
+      PLAYBACK_SPEEDS.forEach(p => c.push(Object.assign({}, base, { id: `P_${p}x`, type: 'speed', speed: p })));
+      LOSS_LEVELS.forEach(l => c.push(Object.assign({}, base, { id: `LOSS_L${l}`, type: 'loss', loss: l })));
+      STARTUP_DELAYS.forEach(d => c.push(Object.assign({}, base, { id: `D_${d}s`, type: 'startup', startDelay: d })));
+      c.push(Object.assign({}, base, { id: 'PERFECT', type: 'perfect' })); // 720p, 1x, no stall for the full video
+      return c;
     }
 
     function shuffleArray(arr) {
@@ -219,12 +234,54 @@
       return a;
     }
 
-    const SESSION_CONDITIONS = buildSessionConditions();      // 15 unique combos, fixed order
-    const shuffledConditions = shuffleArray(SESSION_CONDITIONS); // 15 combos, randomized once
-    const EVALUATION_REPEAT = shuffledConditions.length;      // = 15
+    // Builds the ordered clip list of ONE big session:
+    //  - the 3 videos rotate in a FIXED order (A,B,C,A,B,C,...) -> the same video is never played back-to-back
+    //  - the condition of each video is shuffled independently (each video gets all 18 conditions once)
+    //  - two consecutive clips never share the same condition either
+    function buildSessionPlan(videoIds) {
+      const conds = buildConditions();
+      const n = conds.length;
+      let seq = [];
+      for (let attempt = 0; attempt < 5000; attempt++) {
+        const perVideo = videoIds.map(() => shuffleArray(conds));
+        seq = [];
+        for (let r = 0; r < n; r++) {
+          for (let v = 0; v < videoIds.length; v++) {
+            seq.push({ videoId: videoIds[v], cond: perVideo[v][r] });
+          }
+        }
+        let ok = true;
+        for (let i = 1; i < seq.length; i++) {
+          if (seq[i].videoId === seq[i - 1].videoId || seq[i].cond.id === seq[i - 1].cond.id) { ok = false; break; }
+        }
+        if (ok) break;
+      }
+      return seq;
+    }
 
-    console.log("Randomized session conditions:", shuffledConditions);
-    console.log("Total sessions:", EVALUATION_REPEAT, "| Speeds:", PLAYBACK_SPEEDS.length, "| Resolutions:", RESOLUTIONS.length);
+    // SINGLE SOURCE OF TRUTH for the whole experiment: 2 big sessions x (3 videos x 18 conditions)
+    const SESSIONS = [];
+    for (let s = 0; s * VIDEOS_PER_SESSION < VIDEO_IDS.length; s++) {
+      SESSIONS.push(VIDEO_IDS.slice(s * VIDEOS_PER_SESSION, (s + 1) * VIDEOS_PER_SESSION));
+    }
+    const NUM_SESSIONS = SESSIONS.length;
+
+    const plan = [];
+    SESSIONS.forEach((ids, s) => {
+      buildSessionPlan(ids).forEach((c, i) => {
+        plan.push({ session: s, indexInSession: i, videoId: c.videoId, cond: c.cond });
+      });
+    });
+    const TOTAL_CLIPS = plan.length;
+    const CLIPS_PER_SESSION = TOTAL_CLIPS / NUM_SESSIONS;
+
+    console.log("Experiment plan:", plan.map((c, i) => `${i + 1}: S${c.session + 1} video=${c.videoId} ${c.cond.id}`));
+
+    // Expected watch time of a clip (s): start-up delay + 10 s source, middle 4 s scaled by 1/speed, plus mid-clip stall
+    function plannedDuration(cond) {
+      const mid = TAIL_START - HEAD_END;
+      return cond.startDelay + CLIP_DURATION - mid + mid / cond.speed + cond.stall;
+    }
 
     // --- Logging utility ---
     const logBuffer = [];
@@ -233,37 +290,287 @@
       console.log(...args);
     }
 
-    let swipeLocked = false;
-
-    // --- Start page logic ---
     const startPage = document.getElementById('start-page');
-    // NOTE: the markup has two elements with id="shorts-container" (a legacy
-    // duplicate-id quirk from the original file). getElementById returns the
-    // FIRST one — the one that also holds #swipe-popup — which is the same
-    // element the original script used for all video insertion/display.
     const shortsContainer = document.getElementById('shorts-container');
     const finishPage = document.getElementById('finish-page');
+    const restPage = document.getElementById('rest-page');
+    const scorePage = document.getElementById('score-page');
+    const scoreForm = document.getElementById('score-form');
+    const nextBtn = document.getElementById('next-btn');
+    const stallSpinner = document.getElementById('stall-spinner');
     const downloadLogBtnFinish = document.getElementById('download-log-btn-finish');
-    let userName = ""; // Store user name for log file
 
-    let evaluationCount = 0; // 0-indexed current session number
+    let userName = "";
+    let globalIndex = 0;          // index in `plan` of the clip being played / rated
+    let preparedPromise = null;   // promise of the prepared (preloaded) clip for `globalIndex`
+    let lastStats = null;         // stats of the clip that was just watched
 
-    // --- Rest period logic ---
-    function showRestPage(callback) {
-      const restPage = document.getElementById('rest-page');
+    const blobCache = {};
+    const failedSrcs = new Set();
+    function videoSrc(videoId, res) {
+      return `${RES_PATHS[res]}${videoId + 1}.mp4`;
+    }
+    function lossSrc(videoId, level) {
+      return `${LOSS_PATH}${videoId + 1}_L${level}.mp4`;
+    }
+    function fetchBlob(src) {
+      if (!blobCache[src]) {
+        blobCache[src] = fetch(src)
+          .then(res => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.blob(); })
+          .then(blob => { console.log('Loaded:', src); return URL.createObjectURL(blob); })
+          .catch(() => { console.error('Error loading video:', src); failedSrcs.add(src); return src; }); // fall back to original URL
+      }
+      return blobCache[src];
+    }
+    function preloadSession(s) {
+      const tasks = [];
+      SESSIONS[s].forEach(id => {
+        tasks.push(fetchBlob(videoSrc(id, BASE_RES)));
+        QUALITIES.forEach(res => tasks.push(fetchBlob(videoSrc(id, res))));
+        LOSS_LEVELS.forEach(l => tasks.push(fetchBlob(lossSrc(id, l))));
+      });
+      return Promise.all(tasks);
+    }
+
+    function waitReady(video) {
+      return new Promise(resolve => {
+        if (video.readyState >= 3) return resolve();
+        const done = () => {
+          video.removeEventListener('canplaythrough', done);
+          video.removeEventListener('error', done);
+          resolve();
+        };
+        video.addEventListener('canplaythrough', done);
+        video.addEventListener('error', done);
+        setTimeout(done, 8000); // never block the experiment forever
+      });
+    }
+
+    function makeVideo(url) {
+      const v = document.createElement('video');
+      v.src = url;
+      v.muted = true;
+      v.playsInline = true;
+      v.setAttribute('playsinline', '');
+      v.preload = 'auto';
+      v.load();
+      return v;
+    }
+
+    // Builds the DOM for one clip (hidden) and waits until it can play through.
+    //  - `base`: the video that plays the WHOLE clip (0-10 s):
+    //            720p for every condition, except packet-loss clips where it is the lossy file of that level
+    //  - `alt` : lower-quality video, only used for quality cases; it plays in sync (hidden)
+    //            and is faded in on top of the base video during the middle 4 s.
+    async function prepareClip(clip) {
+      const cond = clip.cond;
+      const baseUrl = await fetchBlob(cond.loss ? lossSrc(clip.videoId, cond.loss) : videoSrc(clip.videoId, BASE_RES));
+      const needAlt = !cond.loss && cond.res !== BASE_RES;
+      const altUrl = needAlt ? await fetchBlob(videoSrc(clip.videoId, cond.res)) : null;
+
+      const el = document.createElement('div');
+      el.className = 'short';
+      const base = makeVideo(baseUrl);
+      el.appendChild(base);
+      let alt = null;
+      if (altUrl) {
+        alt = makeVideo(altUrl);
+        alt.style.opacity = 0;
+        el.appendChild(alt);
+      }
+      shortsContainer.appendChild(el);
+
+      await Promise.all([waitReady(base), alt ? waitReady(alt) : Promise.resolve()]);
+      try { base.currentTime = 0; if (alt) alt.currentTime = 0; } catch (e) {}
+      return { el, base, alt, clip };
+    }
+
+    function runClip(p) {
+      return new Promise(resolve => {
+        const { el, base, alt, clip } = p;
+        const cond = clip.cond;
+        let phase = 0;                                   // 0 = head, 1 = middle, 2 = tail
+        let stallState = cond.stall > 0 ? 'pending' : 'none'; // pending -> running -> done
+        let stallMs = 0;
+        let startDelayMs = 0;
+        let raf = null;
+        let finished = false;
+        const startWall = performance.now();
+
+        const safePlay = v => {
+          const pr = v.play();
+          if (pr && pr.catch) pr.catch(() => { v.muted = true; v.play(); });
+        };
+
+        function finish() {
+          if (finished) return;
+          finished = true;
+          cancelAnimationFrame(raf);
+          base.pause();
+          if (alt) alt.pause();
+          stallSpinner.style.display = 'none';
+          resolve({
+            watchSec: (performance.now() - startWall) / 1000,
+            stallSec: stallMs / 1000,
+            startDelaySec: startDelayMs / 1000,
+            endTime: base.currentTime
+          });
+        }
+
+        function tick() {
+          if (finished) return;
+          const t = base.currentTime;
+
+          if (base.ended || t >= CLIP_DURATION - 0.03) return finish();
+
+          if (stallState !== 'running') {
+            // head -> middle: apply the test condition
+            if (phase === 0 && t >= HEAD_END) {
+              phase = 1;
+              if (cond.speed !== 1) base.playbackRate = cond.speed;
+              if (alt) {
+                // NO seek here: a seek makes the hidden video decode from scratch and shows as a visible hitch.
+                // alt has been playing in sync since the start, so just reveal it.
+                alt.style.opacity = 1; // show lower quality
+              }
+            }
+            // middle -> tail: back to perfect
+            if (phase === 1 && t >= TAIL_START) {
+              phase = 2;
+              base.playbackRate = 1;
+              if (alt) { alt.style.opacity = 0; } // keep it playing (no pause/resume hitches); it is paused in finish()
+            }
+            // keep the low-quality video locked to the base video's clock WITHOUT visible seeks:
+            //  - small drift  -> nudge playbackRate by +-3% (invisible)
+            //  - big drift    -> hard seek, but only while it is hidden (head / tail); in the middle only as a last resort
+            if (alt) {
+              const drift = alt.currentTime - t;           // >0: alt is ahead
+              const ad = Math.abs(drift);
+              if (ad > (phase === 1 ? 0.5 : 0.25)) {
+                alt.currentTime = t;
+                alt.playbackRate = 1;
+              } else if (ad > 0.04) {
+                alt.playbackRate = drift > 0 ? 0.97 : 1.03;
+              } else {
+                alt.playbackRate = 1;
+              }
+            }
+            // stall: freeze the frame for cond.stall seconds (once)
+            if (stallState === 'pending' && t >= STALL_AT) {
+              stallState = 'running';
+              base.pause();
+              if (SHOW_STALL_SPINNER) stallSpinner.style.display = 'flex';
+              const s0 = performance.now();
+              setTimeout(() => {
+                stallMs = performance.now() - s0;
+                stallSpinner.style.display = 'none';
+                stallState = 'done';
+                safePlay(base);
+              }, cond.stall * 1000);
+            }
+          }
+          raf = requestAnimationFrame(tick);
+        }
+
+        // Reveal the clip and start playing it
+        function begin() {
+          el.style.visibility = 'visible';
+          base.playbackRate = 1;
+          if (alt) { alt.playbackRate = 1; alt.style.opacity = 0; }
+          if (alt) safePlay(alt);   // start the hidden video first so both are decoding together
+          safePlay(base);
+          raf = requestAnimationFrame(tick);
+        }
+
+        if (cond.startDelay > 0) {
+          // Start-up delay: the clip stays hidden (black screen) with the spinner, then plays normally
+          if (SHOW_STARTUP_SPINNER) stallSpinner.style.display = 'flex';
+          const d0 = performance.now();
+          setTimeout(() => {
+            startDelayMs = performance.now() - d0;
+            stallSpinner.style.display = 'none';
+            begin();
+          }, cond.startDelay * 1000);
+        } else {
+          begin();
+        }
+      });
+    }
+
+    function disposeClip(p) {
+      try {
+        p.base.pause(); p.base.removeAttribute('src'); p.base.load();
+        if (p.alt) { p.alt.pause(); p.alt.removeAttribute('src'); p.alt.load(); }
+      } catch (e) {}
+      p.el.remove();
+    }
+
+    // FLOW CONTROL
+    async function playCurrent() {
+      const clip = plan[globalIndex];
+      const p = await preparedPromise;
+
+      startPage.style.display = 'none';
+      restPage.style.display = 'none';
+      scorePage.style.display = 'none';
+      finishPage.style.display = 'none';
+      shortsContainer.style.display = '';
+
+      logAndBuffer(`--- Session ${clip.session + 1}/${NUM_SESSIONS} | Video ${clip.indexInSession + 1}/${CLIPS_PER_SESSION} | Video ID ${clip.videoId} | Condition ${clip.cond.id} ---`);
+      console.log('Playing:', clip.cond);
+
+      lastStats = await runClip(p);
+      disposeClip(p);
+      showScorePage();
+    }
+
+    function showScorePage() {
+      const clip = plan[globalIndex];
+      shortsContainer.style.display = 'none';
+      scorePage.style.display = 'flex';
+
+      scorePage.querySelector('h1').innerHTML =
+        `Video Quality Evaluation (Session ${clip.session + 1} / ${NUM_SESSIONS})`;
+      const percent = Math.round(((globalIndex + 1) / TOTAL_CLIPS) * 100);
+      document.getElementById('progress-bar').style.width = percent + '%';
+      document.getElementById('progress-text').innerHTML =
+        `Video ${clip.indexInSession + 1} / ${CLIPS_PER_SESSION} &nbsp;|&nbsp; Total ${globalIndex + 1} / ${TOTAL_CLIPS}`;
+
+      // Prepare the next clip while the participant is voting (no playback is disturbed).
+      const nextIdx = globalIndex + 1;
+      if (nextIdx < TOTAL_CLIPS) {
+        nextBtn.disabled = true;
+        nextBtn.style.opacity = '0.5';
+        preparedPromise = prepareClip(plan[nextIdx]);
+        preparedPromise.then(() => {
+          nextBtn.disabled = false;
+          nextBtn.style.opacity = '1';
+        });
+      } else {
+        nextBtn.disabled = false;
+        nextBtn.style.opacity = '1';
+      }
+    }
+
+    // --- Rest period logic (between big sessions) ---
+    function showRestPage(finishedSession, readyPromise, callback) {
       const resumeBtn = document.getElementById('resume-btn');
+      const timerDiv = document.getElementById('rest-timer');
+      const label = (REST_SECONDS % 60 === 0) ? `${REST_SECONDS / 60}-minute` : `${REST_SECONDS}-second`;
+      document.getElementById('rest-msg').innerHTML =
+        `Session ${finishedSession + 1}/${NUM_SESSIONS} completed.<br>Please take a ${label} break.<br>After the break, press the resume button below to continue.`;
       restPage.style.display = 'flex';
       resumeBtn.style.display = 'none';
-      let seconds = 5;
-      const timerDiv = document.getElementById('rest-timer');
+      let seconds = REST_SECONDS;
       timerDiv.textContent = `Time left: ${seconds}s`;
-      const interval = setInterval(() => {
+      const interval = setInterval(async () => {
         seconds--;
-        timerDiv.textContent = `Time left: ${seconds}s`;
+        timerDiv.textContent = `Time left: ${Math.max(seconds, 0)}s`;
         if (seconds <= 0) {
           clearInterval(interval);
+          await readyPromise; // make sure the next session's first clip is loaded
           resumeBtn.style.display = 'block';
-          resumeBtn.onclick = function() {
+          resumeBtn.onclick = function () {
             restPage.style.display = 'none';
             resumeBtn.style.display = 'none';
             if (callback) callback();
@@ -272,125 +579,76 @@
       }, 1000);
     }
 
-    // No artificial network delay is used in this experiment design
-    // (speed/resolution perception only). Kept as a function so the swipe
-    // transition code below (originally built for a delay-evaluation study)
-    // doesn't need to be rewritten.
-    function getCurrentDelay() {
-      return 0;
-    }
+    // --- Score page submit handler ---
+    scoreForm.onsubmit = function (e) {
+      e.preventDefault();
+      if (nextBtn.disabled) return;
+      const acr = scoreForm.elements['acr'].value;
+      const clip = plan[globalIndex];
+      const cond = clip.cond;
 
-    // GIF overlay for simulating delay (inactive while getCurrentDelay() = 0,
-    // kept in case a delay condition is reintroduced later).
-    const gifOverlay = document.createElement('div');
-    gifOverlay.style.position = 'fixed';
-    gifOverlay.style.top = 0;
-    gifOverlay.style.left = 0;
-    gifOverlay.style.width = '100vw';
-    gifOverlay.style.height = '100vh';
-    gifOverlay.style.background = '#000';
-    gifOverlay.style.zIndex = 99999;
-    gifOverlay.style.display = 'none';
-    gifOverlay.style.justifyContent = 'center';
-    gifOverlay.style.alignItems = 'center';
-    const gifImg = document.createElement('img');
-    gifImg.src = 'output.gif';
-    if (window.innerWidth < 768) {
-      gifImg.style.maxWidth = '100vw';
-      gifImg.style.maxHeight = '100vh';
-    } else {
-      gifImg.style.maxWidth = '30vw';
-      gifImg.style.maxHeight = '30vh';
-    }
-    gifImg.style.position = 'absolute';
-    gifImg.style.top = '50%';
-    gifImg.style.left = '50%';
-    gifImg.style.transform = 'translate(-50%, -50%)';
-    gifOverlay.appendChild(gifImg);
-    document.body.appendChild(gifOverlay);
+      // Everything needed for analysis is written explicitly (no need to infer from position).
+      logAndBuffer(`Session: ${clip.session + 1}/${NUM_SESSIONS}`);
+      logAndBuffer(`Video Order In Session: ${clip.indexInSession + 1}/${CLIPS_PER_SESSION}`);
+      logAndBuffer(`Global Order: ${globalIndex + 1}/${TOTAL_CLIPS}`);
+      logAndBuffer(`Video ID: ${clip.videoId}`);
+      logAndBuffer(`Condition: ${cond.id}`);
+      logAndBuffer(`Condition Type: ${cond.type}`);
+      logAndBuffer(`Middle Resolution: ${cond.res}`);
+      logAndBuffer(`Middle Playback Speed: ${cond.speed}x`);
+      logAndBuffer(`Stall Time: ${cond.stall}s`);
+      logAndBuffer(`Startup Delay: ${cond.startDelay}s`);
+      logAndBuffer(`Packet Loss Level: ${cond.loss ? 'L' + cond.loss + ' (nominal ' + LOSS_NOMINAL[cond.loss] + ')' : 'none'}`);
+      logAndBuffer(`Planned Watch Time: ${plannedDuration(cond).toFixed(2)}s`);
+      if (lastStats) {
+        logAndBuffer(`Actual Watch Time: ${lastStats.watchSec.toFixed(2)}s`);
+        logAndBuffer(`Actual Stall Time: ${lastStats.stallSec.toFixed(2)}s`);
+        logAndBuffer(`Actual Startup Delay: ${lastStats.startDelaySec.toFixed(2)}s`);
+      }
+      logAndBuffer(`ACR Score: ${acr}`);
 
-    function loadVideosWithFetch(videoObjs, callback) {
-      let loaded = 0;
-      const total = videoObjs.length;
-      const blobs = new Array(total);
+      const finishedClip = clip;
+      globalIndex++;
+      scoreForm.reset();
 
-      videoObjs.forEach((video, idx) => {
-        fetch(video.src)
-          .then(res => res.blob())
-          .then(blob => {
-            blobs[idx] = URL.createObjectURL(blob);
-            loaded++;
-            console.log(`Video ${idx + 1}/${total} loaded: ${video.src}`);
-            if (loaded === total) callback(blobs);
-          })
-          .catch(() => {
-            console.error(`Error loading video ${idx + 1}/${total}: ${video.src}`);
-            blobs[idx] = video.src; // fall back to original URL on error
-            loaded++;
-            if (loaded === total) callback(blobs);
-          });
-      });
-    }
+      if (globalIndex >= TOTAL_CLIPS) {
+        scorePage.style.display = 'none';
+        finishPage.style.display = 'flex';
+        return;
+      }
 
-    function getPredefinedVideos(sessionIndex) {
-      const condition = shuffledConditions[sessionIndex % shuffledConditions.length];
-      const folderPath = RES_PATHS[condition.resolution];
-      return VIDEO_IDS.map(vidIndex => ({
-        title: `Video ${vidIndex + 1}`,
-        src: `${folderPath}${vidIndex + 1}.mp4`
-      }));
-    }
+      const sessionChanged = plan[globalIndex].session !== finishedClip.session;
+      if (sessionChanged) {
+        scorePage.style.display = 'none';
+        showRestPage(finishedClip.session, preparedPromise, () => { playCurrent(); });
+      } else {
+        playCurrent();
+      }
+    };
 
-    // Fetches + inserts the 6 videos for a given session, and immediately
-    // applies that session's playback speed to all 6 <video> elements so
-    // there is no moment where a video plays at the wrong rate.
-    function renderSessionVideos(sessionIndex, onComplete) {
-      const condition = shuffledConditions[sessionIndex % shuffledConditions.length];
-      const videos = getPredefinedVideos(sessionIndex);
-
-      loadVideosWithFetch(videos, function(blobUrls) {
-        const oldShorts = shortsContainer.querySelectorAll('.short');
-        oldShorts.forEach(el => el.remove());
-
-        const videoHTML = videos.map((video, idx) => `
-          <div class="short" style="transform: translateY(${idx * 100}%);">
-            <video
-              src="${blobUrls[idx]}"
-              playsinline
-              preload="auto"
-              autoplay
-              muted
-              style="width:100%;height:100%;background:#000;object-fit:cover;"
-            ></video>
-            <div style="position:absolute;bottom:16px;left:16px;color:#fff;font-size:1.2rem;text-shadow:0 0 8px #000;"></div>
-          </div>
-        `).join('');
-
-        shortsContainer.insertAdjacentHTML('beforeend', videoHTML);
-
-        // Apply this session's playback speed to all 6 videos right away.
-        shortsContainer.querySelectorAll('.short video').forEach(v => {
-          v.playbackRate = condition.speed;
-        });
-
-        if (onComplete) onComplete();
-      });
-    }
-
+    // --- Start button ---
     const startBtn = document.getElementById('start-btn');
     startBtn.disabled = true;
     startBtn.style.opacity = '0.5';
 
-    // Preload session 1 (index 0) before the participant can press Start.
-    renderSessionVideos(evaluationCount, function() {
+    // Preload session 1 before the participant can press Start, then session 2 in the background.
+    preloadSession(0).then(() => {
       startBtn.disabled = false;
       startBtn.style.opacity = '1';
+      if (failedSrcs.size > 0) {
+        // Not blocking (so local testing still works), but visible so a wrong path / missing file is noticed.
+        const w = document.getElementById('load-warning');
+        w.style.display = 'block';
+        w.innerHTML = 'Warning: could not preload ' + failedSrcs.size + ' file(s):<br>' + Array.from(failedSrcs).join('<br>');
+      }
+      if (NUM_SESSIONS > 1) {
+        preloadSession(1).then(() => {
+          if (failedSrcs.size > 0) logAndBuffer('WARNING: could not preload: ' + Array.from(failedSrcs).join(', '));
+        });
+      }
     });
 
-    document.getElementById('start-btn').onclick = function() {
-      clearTimeout(window._swipePopupTimeout);
-      document.getElementById('swipe-popup').style.display = 'none';
-
+    startBtn.onclick = function () {
       const name = document.getElementById('name-input').value.trim();
       const age = document.getElementById('age-input').value.trim();
       const exp = document.getElementById('exp-input').value.trim();
@@ -406,390 +664,31 @@
       logAndBuffer('User Age:', age);
       logAndBuffer('Experience (years):', exp);
       logAndBuffer('Device Name:', device);
-
-      startPage.style.display = 'none';
-      shortsContainer.style.display = '';
-
-      restartPlayback();
-      setTimeout(() => {
-        playCurrentVideo();
-      }, 0);
-    };
-
-    // Resets playback state and (re)shows the current session's videos.
-    // NOTE: this does NOT reload the videos from disk — those are already
-    // preloaded either by the initial renderSessionVideos() call above, or
-    // by the preload triggered inside showFinishPage() for the next session.
-    function restartPlayback() {
-      currentIndex = 0;
-      playTimes = Array(VIDEO_IDS.length).fill(0);
-      shortsContainer.style.display = '';
-      finishPage.style.display = 'none';
-      scorePage.style.display = 'none';
-
-      shorts = document.querySelectorAll('.short');
-      playStart = Date.now();
-      updateShorts();
-
-      const condition = shuffledConditions[evaluationCount];
-      console.log("Current session:", evaluationCount + 1, "/", EVALUATION_REPEAT);
-      console.log("Current playback speed:", condition.speed);
-      console.log("Current resolution:", condition.resolution);
-      console.log("Current videos:", VIDEO_IDS);
-      logAndBuffer(`--- Starting Session ${evaluationCount + 1}/${EVALUATION_REPEAT} | Speed: ${condition.speed}x | Resolution: ${condition.resolution} ---`);
-    }
-
-    // Called when the participant finishes the 6th video of a session:
-    // hides the shorts, shows the score/rating page, and preloads the next
-    // session's videos in the background (if there is one).
-    function showFinishPage() {
-      shortsContainer.style.display = 'none';
-      scorePage.style.display = 'flex';
-      shorts.forEach((short) => {
-        const video = short.querySelector('video');
-        try {
-          video.pause();
-          video.muted = true;
-        } catch (e) {}
+      plan.forEach((c, i) => {
+        logAndBuffer(`PLAN ${i + 1}: S${c.session + 1} #${c.indexInSession + 1} video=${c.videoId} cond=${c.cond.id}`);
       });
 
-      scorePage.querySelector('h1').innerHTML = `Video Quality Evaluation (Session ${evaluationCount + 1} / ${EVALUATION_REPEAT})`;
-      updateProgressBar();
-
-      setTimeout(() => {
-        scorePage.style.display = 'flex';
-        shortsContainer.style.display = 'none';
-        window.scrollTo(0, 1);
-        window.scrollTo(0, 0);
-      }, 50);
-
-      const nextBtn = document.getElementById('next-btn');
-      const nextSessionIndex = evaluationCount + 1;
-
-      if (nextSessionIndex < EVALUATION_REPEAT) {
-        nextBtn.disabled = true;
-        nextBtn.style.opacity = '0.5';
-        renderSessionVideos(nextSessionIndex, function() {
-          nextBtn.disabled = false;
-          nextBtn.style.opacity = '1';
-        });
-      } else {
-        // Last session — nothing more to preload.
-        nextBtn.disabled = false;
-        nextBtn.style.opacity = '1';
-      }
-    }
-
-    function updateProgressBar() {
-      const percent = Math.round(((evaluationCount + 1) / EVALUATION_REPEAT) * 100);
-      document.getElementById('progress-bar').style.width = percent + '%';
-      document.getElementById('progress-text').innerHTML =
-        `${evaluationCount + 1} / ${EVALUATION_REPEAT} Complete`;
-    }
-
-    // --- Score page submit handler ---
-    const scorePage = document.getElementById('score-page');
-    const scoreForm = document.getElementById('score-form');
-    scoreForm.onsubmit = function(e) {
-      e.preventDefault();
-      const acr = scoreForm.elements['acr'].value;
-      const condition = shuffledConditions[evaluationCount];
-
-      // Log everything needed to analyze speed/resolution/score later,
-      // without having to infer the condition from the session's position.
-      logAndBuffer(`Session: ${evaluationCount + 1}`);
-      logAndBuffer(`Playback Speed: ${condition.speed}x`);
-      logAndBuffer(`Resolution: ${condition.resolution}`);
-      logAndBuffer(`Videos: ${VIDEO_IDS.join(',')}`);
-      logAndBuffer(`ACR Score: ${acr}`);
-
-      evaluationCount++;
-      scoreForm.reset();
-
-      if (REST_AFTER_SESSION !== null && evaluationCount === REST_AFTER_SESSION) {
-        scorePage.style.display = 'none';
-        showRestPage(() => {
-          restartPlayback();
-          setTimeout(() => {
-            playCurrentVideo();
-          }, 0);
-        });
-        return;
-      }
-
-      if (evaluationCount < EVALUATION_REPEAT) {
-        restartPlayback();
-        setTimeout(() => {
-          playCurrentVideo();
-        }, 0);
-      } else {
-        scorePage.style.display = 'none';
-        finishPage.style.display = 'flex';
-      }
+      startBtn.disabled = true;
+      startBtn.style.opacity = '0.5';
+      globalIndex = 0;
+      preparedPromise = prepareClip(plan[0]);
+      playCurrent();
     };
 
-    downloadLogBtnFinish.onclick = function() {
+    // --- Download log ---
+    downloadLogBtnFinish.onclick = function () {
       const safeName = userName.replace(/[^a-zA-Z0-9_\-]/g, "_");
       const now = new Date();
       const pad = n => n.toString().padStart(2, '0');
       const dateStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-      const blob = new Blob([logBuffer.join('\n')], {type: 'text/plain'});
+      const blob = new Blob([logBuffer.join('\n')], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `log_speed_resolution_${safeName}_${dateStr}.txt`;
+      a.download = `log_quality_stall_loss_speed_${safeName}_${dateStr}.txt`;
       a.click();
       URL.revokeObjectURL(url);
     };
-
-    var shorts = document.querySelectorAll('.short');
-    let currentIndex = 0;
-    let startY = 0;
-    let isTouch = false;
-
-    // --- Play time tracking ---
-    var playTimes = Array(VIDEO_IDS.length).fill(0); // ms
-    let playStart = Date.now();
-
-    function logPlayTime(index) {
-      const now = Date.now();
-      playTimes[index] += now - playStart;
-      logAndBuffer(
-        `Video ${index} (${VIDEO_IDS[index]}) play time: ${playTimes[index] / 1000}s`
-      );
-      playStart = now;
-    }
-
-    // --- Touch events (mobile & touchpad) ---
-    document.addEventListener('touchstart', (e) => {
-      if (
-        startPage.style.display !== "none" ||
-        scorePage.style.display !== "none" ||
-        finishPage.style.display !== "none"
-      ) return;
-      logAndBuffer('Touch start detected');
-      isTouch = true;
-      startY = e.touches[0].clientY;
-    });
-
-    document.addEventListener('touchend', (e) => {
-      if (
-        startPage.style.display !== "none" ||
-        scorePage.style.display !== "none" ||
-        finishPage.style.display !== "none"
-      ) return;
-      if (!isTouch) return;
-      const endY = e.changedTouches[0].clientY;
-      if (endY - startY > 0) {
-        handleSwipe(-100);
-        logAndBuffer('Swipe down detected');
-      } else {
-        handleSwipe(100);
-        logAndBuffer('Swipe up detected');
-      }
-    });
-
-    // Mouse events (touchpad swipe)
-    let mouseDown = false;
-    let mouseStartY = 0;
-    document.addEventListener('mousedown', (e) => {
-      if (startPage.style.display !== "none" || finishPage.style.display !== "none") return;
-      isTouch = false;
-      mouseDown = true;
-      mouseStartY = e.clientY;
-    });
-
-    document.addEventListener('mouseup', (e) => {
-      if (startPage.style.display !== "none" || finishPage.style.display !== "none") return;
-      if (!mouseDown) return;
-      mouseDown = false;
-      const deltaY = e.clientY - mouseStartY;
-      handleSwipe(deltaY);
-    });
-
-    // Wheel event (for mouse scroll/touchpad swipe)
-    let wheelLocked = false;
-    document.addEventListener('wheel', function(e) {
-      if (finishPage.style.display !== "none") return;
-      if (startPage.style.display !== "none") return;
-      if (isTouch) return;
-      if (mouseDown) return;
-      if (wheelLocked) return;
-      if (e.deltaY < -20) {
-        handleSwipe(100);
-        wheelLocked = true;
-        setTimeout(() => { wheelLocked = false; }, 400);
-        e.preventDefault();
-      } else if (e.deltaY > 20) {
-        handleSwipe(-100);
-        wheelLocked = true;
-        setTimeout(() => { wheelLocked = false; }, 400);
-        e.preventDefault();
-      }
-    }, { passive: false });
-
-    // Keyboard events for up/down arrow keys
-    document.addEventListener('keydown', (e) => {
-      if (startPage.style.display !== "none" || finishPage.style.display !== "none") return;
-      if (e.key === 'ArrowDown') {
-        handleSwipe(-100);
-      } else if (e.key === 'ArrowUp') {
-        handleSwipe(100);
-      }
-    });
-
-    function updateShorts() {
-      if (
-        startPage.style.display !== "none" ||
-        finishPage.style.display !== "none"
-      ) {
-        shorts.forEach((short) => {
-          const video = short.querySelector('video');
-          if (!video.paused) video.pause();
-          video.currentTime = 0;
-          video.onclick = null;
-        });
-        clearTimeout(window._swipePopupTimeout);
-        document.getElementById('swipe-popup').style.display = 'none';
-        return;
-      }
-
-      const condition = shuffledConditions[evaluationCount];
-      shorts.forEach((short, index) => {
-        short.style.transform = `translateY(${(index - currentIndex) * 100}%)`;
-        const video = short.querySelector('video');
-        if (index === currentIndex) {
-          video.currentTime = 0;
-          video.muted = true;
-          if (condition) video.playbackRate = condition.speed;
-        } else {
-          video.pause();
-          video.currentTime = 0;
-          video.onclick = null;
-        }
-      });
-      playStart = Date.now();
-    }
-
-    function playCurrentVideo() {
-      const video = shorts[currentIndex]?.querySelector('video');
-      const condition = shuffledConditions[evaluationCount];
-      const roundViewTime = VIEW_TIME_MS;
-
-      if (video) {
-        video.muted = true;
-        if (condition) video.playbackRate = condition.speed;
-
-        var playPromise = video.play();
-        if (playPromise !== undefined) {
-          playPromise.then(_ => {
-            video.muted = true;
-            if (condition) video.playbackRate = condition.speed;
-          }).catch(error => {
-            console.log("Autoplay blocked. Forcing mute play.");
-            video.muted = true;
-            video.play();
-          });
-        }
-
-        setTimeout(() => {
-          if (video.paused) {
-            video.muted = true;
-            video.play();
-          }
-          if (condition) video.playbackRate = condition.speed;
-        }, 50);
-
-        if (
-          startPage.style.display === "none" &&
-          finishPage.style.display === "none" &&
-          (typeof scorePage === 'undefined' || scorePage.style.display === "none")
-        ) {
-          clearTimeout(window._swipePopupTimeout);
-          document.getElementById('swipe-popup').style.display = 'none';
-          swipeLocked = true;
-
-          if (typeof roundViewTime === 'number' && !isNaN(roundViewTime)) {
-            window._swipePopupTimeout = setTimeout(() => {
-              document.getElementById('swipe-popup').style.display = 'flex';
-              swipeLocked = false;
-            }, roundViewTime);
-          }
-        }
-      }
-    }
-
-    function handleSwipe(deltaY) {
-      if (swipeLocked) return;
-      clearTimeout(window._swipePopupTimeout);
-      document.getElementById('swipe-popup').style.display = 'none';
-
-      if (isTouch) {
-        deltaY = -deltaY;
-      } else if (mouseDown) {
-        deltaY = -deltaY;
-      }
-
-      if (Math.abs(deltaY) > 5) {
-        const delay = getCurrentDelay();
-
-        // --- SWIPE DOWN (Next Video) ---
-        if (deltaY < 0 && currentIndex < shorts.length - 1) {
-          logPlayTime(currentIndex);
-          currentIndex++;
-
-          if (delay > 0) {
-            gifOverlay.style.display = 'flex';
-            updateShorts();
-            setTimeout(() => {
-              gifOverlay.style.display = 'none';
-              playCurrentVideo();
-            }, delay);
-          } else {
-            updateShorts();
-            playCurrentVideo();
-          }
-
-        // --- SWIPE UP (Previous Video) ---
-        } else if (deltaY > 0 && currentIndex > 0) {
-          logPlayTime(currentIndex);
-          currentIndex--;
-
-          if (delay > 0) {
-            gifOverlay.style.display = 'flex';
-            updateShorts();
-            setTimeout(() => {
-              gifOverlay.style.display = 'none';
-              playCurrentVideo();
-            }, delay);
-          } else {
-            updateShorts();
-            playCurrentVideo();
-          }
-
-        // --- LAST VIDEO (go to score page) ---
-        } else if (deltaY < 0 && currentIndex === shorts.length - 1) {
-          logPlayTime(currentIndex);
-          if (delay > 0) {
-            gifOverlay.style.display = 'flex';
-            setTimeout(() => {
-              gifOverlay.style.display = 'none';
-              showFinishPage();
-            }, delay);
-          } else {
-            showFinishPage();
-          }
-        }
-      }
-    }
-
-    // Log play time when user leaves the page
-    window.addEventListener('beforeunload', () => {
-      logPlayTime(currentIndex);
-      playTimes.forEach((t, i) => {
-        logAndBuffer(`Final Video ${i} play time: ${t / 1000}s`);
-      });
-    });
   </script>
 </body>
 </html>
