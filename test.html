@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+  <title>Quality, Stall, Packet Loss & Playback Speed Evaluation</title>
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background-color: #000000;
+      width: 100vw;
+      height: 100dvh;
+      overflow: hidden;
+      touch-action: none; /* Prevents default browser scrolling on mobile */
+    }
+
+    /* --- Main Video Container --- */
+    #shorts-container {
+      /* Default PC Style: 9:16 aspect ratio centered */
+      height: 100dvh;
+      width: calc(100dvh * 9 / 16);
+      max-width: 100vw;
+      overflow: hidden;
+      position: fixed;
+      background: #000000;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      box-shadow: 0 0 32px rgba(0,0,0,0.5);
+      z-index: 9999;
+      border-radius: 16px;
+    }
+
+    /* --- Smartphone / Mobile Optimization --- */
+    @media (max-width: 768px) {
+      #shorts-container {
+        width: 100%;       /* Force full width on mobile */
+        height: 100%;      /* Force full height */
+        max-width: none;
+        border-radius: 0;  /* Remove rounded corners on mobile */
+        box-shadow: none;
+      }
+    }
+
+    /* --- Video Item (one clip = base video + optional lower-quality overlay video) --- */
+    .short {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 1;
+      visibility: hidden; /* shown by JS only when the clip starts */
+    }
+
+    .short video {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      background: #000;
+    }
+
+    /* --- Buffering spinner (used for the mid-clip stall AND the start-up delay) --- */
+    #stall-spinner {
+      display: none;
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      z-index: 5;
+      justify-content: center;
+      align-items: center;
+      pointer-events: none;
+    }
+    .spinner {
+      width: 56px;
+      height: 56px;
+      border: 6px solid rgba(255,255,255,0.35);
+      border-top-color: #ffffff;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+  <!-- Video stage -->
+  <div id="shorts-container" style="display:none;">
+    <div id="stall-spinner"><div class="spinner"></div></div>
+    <!-- Clips will be injected here -->
+  </div>
+
+  <!-- Start page -->
+  <div id="start-page" style="position:fixed;inset:0;width:100vw;height:100dvh;background:#000;display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:10000;overflow:auto;">
+    <h1 style="color:#fff;margin-bottom:32px;">Main Evaluation</h1>
+    <div style="color:#fff;font-size:1.1rem;max-width:90vw;margin-bottom:32px;line-height:1.7;text-align:left;">
+      Please input your name, age, and experience with short video services.<br>
+      Then, click the "START" button to start the main evaluation.<br>
+      The test has 2 sessions. After each video ends, a rating form appears immediately.<br>
+      Some videos may start with a loading screen, freeze for a moment, play slower, look blurry, or show glitches. Please rate your overall viewing experience of each video.<br>
+      <br>
+    </div>
+    <label style="color:#fff;font-size:1.2rem;margin-bottom:8px;" for="name-input">Your Name:</label>
+    <input id="name-input" type="text" required style="font-size:1.2rem;padding:8px 12px;border-radius:8px;border:none;margin-bottom:20px;width:200px;">
+
+    <label style="color:#fff;font-size:1.2rem;margin-bottom:8px;" for="age-input">Your Age:</label>
+    <input id="age-input" type="number" min="1" max="120" required style="font-size:1.2rem;padding:8px 12px;border-radius:8px;border:none;margin-bottom:20px;width:200px;">
+    <label style="color:#fff;font-size:1.2rem;margin-bottom:8px;" for="exp-input">Experience with short video services (years):</label>
+    <input id="exp-input" type="number" min="0" max="50" step="0.1" required style="font-size:1.2rem;padding:8px 12px;border-radius:8px;border:none;margin-bottom:32px;width:200px;">
+    <label style="color:#fff;font-size:1.2rem;margin-bottom:8px;" for="device-input">Device name:</label>
+    <input id="device-input" type="text" required style="font-size:1.2rem;padding:8px 12px;border-radius:8px;border:none;margin-bottom:32px;width:200px;">
+    <!-- Shown only if some video file could not be preloaded (wrong path / missing file) -->
+    <div id="load-warning" style="display:none;color:#ff6b6b;font-size:0.9rem;max-width:90vw;margin-bottom:16px;text-align:center;word-break:break-all;"></div>
+    <button id="start-btn" style="font-size:2rem;padding:16px 48px;border-radius:12px;border:none;background:#ff0000;color:#fff;cursor:pointer;">Start</button>
+    <div style="color:#555;font-size:0.75rem;margin-top:16px;">build v3-baked-speed-quality (2026-10-30)</div>
+  </div>
+
+  <!-- Finish page -->
+  <div id="finish-page" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:20001;flex-direction:column;justify-content:center;align-items:center;">
+    <h1 style="color:#fff;margin-bottom:32px;">Thank you for participating!</h1>
+    <p style="color:#fff;font-size:1.2rem;margin-bottom:32px;">You have finished watching all videos.</p>
+    <button id="download-log-btn-finish" style="font-size:1.2rem;padding:12px 32px;border-radius:8px;border:none;background:#222;color:#fff;cursor:pointer;">Download Log</button>
+    <div style="margin-top:32px;color:#fff;font-size:1.1rem;text-align:center;">
+      Please upload your downloaded log file to:<br>
+      <a href="https://drive.google.com/drive/folders/1BRxLc0jS_SFxjNz3-JeL44CBwAL40OUX?usp=sharing" target="_blank" style="color:#4af;text-decoration:underline;">
+        https://drive.google.com/drive/folders/1BRxLc0jS_SFxjNz3-JeL44CBwAL40OUX?usp=sharing
+      </a>
+    </div>
+  </div>
+
+  <!-- Rest period screen (between the 2 big sessions) -->
+  <div id="rest-page" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:30000;flex-direction:column;justify-content:center;align-items:center;">
+    <h1 style="color:#fff;margin-bottom:32px;">Rest Period</h1>
+    <p id="rest-msg" style="color:#fff;font-size:1.5rem;text-align:center;"></p>
+    <div id="rest-timer" style="color:#fff;font-size:2rem;margin-top:24px;"></div>
+    <button id="resume-btn" style="display:none;margin-top:32px;font-size:1.5rem;padding:16px 48px;border-radius:12px;border:none;background:#ff0000;color:#fff;cursor:pointer;">Resume</button>
+  </div>
+
+  <!-- Score / rating page (shown right after EVERY video) -->
+  <div id="score-page" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:20002;flex-direction:column;justify-content:center;align-items:center;">
+    <h1 style="color:#fff;margin-bottom:32px;text-align:center;">Voting</h1>
+
+    <div id="progress-bar-container" style="width:60vw;max-width:400px;height:24px;background:#222;border-radius:12px;overflow:hidden;margin-bottom:8px;">
+      <div id="progress-bar" style="height:100%;width:0%;background:#ff0000;transition:width 0.4s;"></div>
+    </div>
+    <div id="progress-text" style="color:#fff;font-size:1.1rem;margin-bottom:16px;text-align:center;">
+    </div>
+    <p style="color:#fff;font-size:1.2rem;margin-bottom:24px;text-align:center;">
+      Please rate the last test sample:
+    </p>
+    <form id="score-form" style="color:#fff;font-size:1.2rem;display:flex;flex-direction:column;align-items:center;">
+      <label><input type="radio" name="acr" value="5" required> 5: Excellent </label>
+      <label><input type="radio" name="acr" value="4"> 4: Good</label>
+      <label><input type="radio" name="acr" value="3"> 3: Fair</label>
+      <label><input type="radio" name="acr" value="2"> 2: Poor</label>
+      <label><input type="radio" name="acr" value="1"> 1: Bad</label>
+      <button id="next-btn" type="submit" style="margin-top:24px;font-size:1.2rem;padding:12px 32px;border-radius:8px;border:none;background:#ce0909;color:#fff;cursor:pointer;">Next Test</button>
+    </form>
+  </div>
+
+  <script>
+
+
+    // 6 fixed video IDs (0-indexed; file name = ID+1).
+    // Big session 1 = first 3 videos, big session 2 = last 3 videos.
+    const VIDEO_IDS = [90, 111, 114, 112, 93, 154];   // -> files 91, 112, 115, 113, 94, 155
+    const VIDEOS_PER_SESSION = 3;
+
+    // Each source video is exactly 10 s: [0-3s] perfect | [3-7s] impaired | [7-10s] perfect
+    const CLIP_DURATION = 10;
+    const HEAD_END      = 3;   // end of the first perfect part (s of source time)
+    const TAIL_START    = 7;   // start of the last perfect part (s of source time)
+    const STALL_AT      = 5;   // source time at which the mid-clip stall freezes the video (centre of the 4 s middle)
+    const SHOW_STALL_SPINNER   = true; // spinner while the video is frozen in the middle of the clip
+    const SHOW_STARTUP_SPINNER = true; // spinner on the black screen before the video starts
+
+    // Perfect reference settings (used for the first 3 s, the last 3 s, and the PERFECT case)
+    const BASE_RES = "720p";
+
+    // Factors tested in the 4 s middle part
+    const QUALITIES        = ["720p", "480p", "240p"];       // quality in the middle part
+    const STALL_TIMES      = [0.5, 1, 2];                    // seconds of freeze in the middle of the clip
+    const PLAYBACK_SPEEDS  = [0.9, 0.8, 0.7, 0.6, 0.5];     // speed in the middle part
+
+    // NEW: packet-loss versions. The loss is already baked into the files (loss only in the middle 4 s).
+    // Files: LOSS_PATH + (videoId+1) + "_L" + level + ".mp4"   e.g. ./video_resolution/loss/91_L2.mp4
+    const LOSS_LEVELS  = [1, 2, 3];
+    const LOSS_NOMINAL = { 1: "0.1%", 2: "0.5%", 3: "1.0%" };  // nominal loss rate inside the lossy 4 s (only used for the log)
+    const LOSS_PATH    = "./video_resolution/loss/";
+
+    // Quality-switch clips are PRE-RENDERED as ONE file each (3 s 720p | 4 s low quality | 3 s 720p), so there is
+    // no overlay/sync at runtime and therefore no hitch at the switch. Files: QUALITY_PATH + (videoId+1) + "_Q" + res + ".mp4"
+    // e.g. ./video_resolution/quality/91_Q480p.mp4. Set to false to go back to the old two-video overlay.
+    const USE_BAKED_QUALITY = true;
+    const QUALITY_PATH = "./video_resolution/quality/";
+
+    // Slow-motion clips are ALSO pre-rendered as ONE file each (3 s normal | 4 s of source played at <speed> | 3 s normal),
+    // so the browser never changes playbackRate mid-clip (that is what caused the small hitch on phones).
+    // Files: SPEED_PATH + (videoId+1) + "_P" + speed + ".mp4"  e.g. ./video_resolution/speed/91_P0.5.mp4
+    // If a file is missing, the page falls back to the old playbackRate method for that clip (and logs it).
+    const USE_BAKED_SPEED = true;
+    const SPEED_PATH = "./video_resolution/speed/";
+
+    // NEW: start-up (initial buffering) delay when the video is opened: black screen + spinner, then the video plays normally
+    const STARTUP_DELAYS = [0.5, 1, 2];                       // seconds of black screen before the video starts
+
+    // Block every way a participant could interact with the playing clip (keys, context menu, double-tap, touch gestures)
+    (function lockInteraction() {
+      const stop = e => { if (e.target && e.target.closest && e.target.closest('input, textarea, button, select, label, form')) return; e.preventDefault(); };
+      document.addEventListener('keydown', e => {
+        if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return; // typing in the start form still works
+        if ([' ', 'Spacebar', 'k', 'K', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'j', 'l', 'm', 'f', 'Home', 'End', 'MediaPlayPause'].includes(e.key)) e.preventDefault();
+      }, true);
+      document.addEventListener('contextmenu', stop);
+      document.addEventListener('dblclick', stop);
+      document.addEventListener('gesturestart', stop);
+      document.addEventListener('touchmove', e => { if (shortsContainer && shortsContainer.style.display !== 'none') e.preventDefault(); }, { passive: false });
+    })();
+
+    // OS-level media controls (notification shade, lock screen, Bluetooth earbuds, keyboard media keys) must do nothing
+    try {
+      if ('mediaSession' in navigator) {
+        ['play', 'pause', 'stop', 'seekbackward', 'seekforward', 'seekto', 'previoustrack', 'nexttrack']
+          .forEach(a => { try { navigator.mediaSession.setActionHandler(a, () => {}); } catch (e) {} });
+      }
+    } catch (e) {}
+
+    // Folder for each resolution. Each folder must contain the 10 s version of every video.
+    const RES_PATHS = {
+      "720p": "./video_resolution/720p/",
+      "480p": "./video_resolution/480p/",
+      "360p": "./video_resolution/360p/",
+      "240p": "./video_resolution/240p/",
+      "144p": "./video_resolution/144p/",
+      "96p":  "./video_resolution/96p/"
+    };
+
+    // Rest between the 2 big sessions (seconds)
+    const REST_SECONDS = 30;
+
+    function buildConditions() {
+      const c = [];
+      const base = { res: BASE_RES, speed: 1, stall: 0, startDelay: 0, loss: 0 };
+      QUALITIES.forEach(q => c.push(Object.assign({}, base, { id: `Q_${q}`, type: 'quality', res: q })));
+      STALL_TIMES.forEach(t => c.push(Object.assign({}, base, { id: `T_${t}s`, type: 'stall', stall: t })));
+      PLAYBACK_SPEEDS.forEach(p => c.push(Object.assign({}, base, { id: `P_${p}x`, type: 'speed', speed: p })));
+      LOSS_LEVELS.forEach(l => c.push(Object.assign({}, base, { id: `LOSS_L${l}`, type: 'loss', loss: l })));
+      STARTUP_DELAYS.forEach(d => c.push(Object.assign({}, base, { id: `D_${d}s`, type: 'startup', startDelay: d })));
+      c.push(Object.assign({}, base, { id: 'PERFECT', type: 'perfect' })); // 720p, 1x, no stall for the full video
+      return c;
+    }
+
+    function shuffleArray(arr) {
+      const a = arr.slice();
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    // Builds the ordered clip list of ONE big session:
+    //  - the 3 videos rotate in a FIXED order (A,B,C,A,B,C,...) -> the same video is never played back-to-back
+    //  - the condition of each video is shuffled independently (each video gets all 18 conditions once)
+    //  - two consecutive clips never share the same condition either
+    function buildSessionPlan(videoIds) {
+      const conds = buildConditions();
+      const n = conds.length;
+      let seq = [];
+      for (let attempt = 0; attempt < 5000; attempt++) {
+        const perVideo = videoIds.map(() => shuffleArray(conds));
+        seq = [];
+        for (let r = 0; r < n; r++) {
+          for (let v = 0; v < videoIds.length; v++) {
+            seq.push({ videoId: videoIds[v], cond: perVideo[v][r] });
+          }
+        }
+        let ok = true;
+        for (let i = 1; i < seq.length; i++) {
+          if (seq[i].videoId === seq[i - 1].videoId || seq[i].cond.id === seq[i - 1].cond.id) { ok = false; break; }
+        }
+        if (ok) break;
+      }
+      return seq;
+    }
+
+    // SINGLE SOURCE OF TRUTH for the whole experiment: 2 big sessions x (3 videos x 18 conditions)
+    const SESSIONS = [];
+    for (let s = 0; s * VIDEOS_PER_SESSION < VIDEO_IDS.length; s++) {
+      SESSIONS.push(VIDEO_IDS.slice(s * VIDEOS_PER_SESSION, (s + 1) * VIDEOS_PER_SESSION));
+    }
+    const NUM_SESSIONS = SESSIONS.length;
+
+    const plan = [];
+    SESSIONS.forEach((ids, s) => {
+      buildSessionPlan(ids).forEach((c, i) => {
+        plan.push({ session: s, indexInSession: i, videoId: c.videoId, cond: c.cond });
+      });
+    });
+    const TOTAL_CLIPS = plan.length;
+    const CLIPS_PER_SESSION = TOTAL_CLIPS / NUM_SESSIONS;
+
+    console.log("Experiment plan:", plan.map((c, i) => `${i + 1}: S${c.session + 1} video=${c.videoId} ${c.cond.id}`));
+
+    // Expected watch time of a clip (s): start-up delay + 10 s source, middle 4 s scaled by 1/speed, plus mid-clip stall
+    function plannedDuration(cond) {
+      const mid = TAIL_START - HEAD_END;
+      return cond.startDelay + CLIP_DURATION - mid + mid / cond.speed + cond.stall;
+    }
+
+    // --- Logging utility ---
+    const logBuffer = [];
+    function logAndBuffer(...args) {
+      logBuffer.push(args.map(String).join(' '));
+      console.log(...args);
+    }
+
+    const startPage = document.getElementById('start-page');
+    const shortsContainer = document.getElementById('shorts-container');
+    const finishPage = document.getElementById('finish-page');
+    const restPage = document.getElementById('rest-page');
+    const scorePage = document.getElementById('score-page');
+    const scoreForm = document.getElementById('score-form');
+    const nextBtn = document.getElementById('next-btn');
+    const stallSpinner = document.getElementById('stall-spinner');
+    const downloadLogBtnFinish = document.getElementById('download-log-btn-finish');
+
+    let userName = "";
+    let globalIndex = 0;          // index in `plan` of the clip being played / rated
+    let preparedPromise = null;   // promise of the prepared (preloaded) clip for `globalIndex`
+    let lastStats = null;         // stats of the clip that was just watched
+
+    const blobCache = {};
+    const failedSrcs = new Set();
+    function videoSrc(videoId, res) {
+      return `${RES_PATHS[res]}${videoId + 1}.mp4`;
+    }
+    function lossSrc(videoId, level) {
+      return `${LOSS_PATH}${videoId + 1}_L${level}.mp4`;
+    }
+    function qualSrc(videoId, res) {
+      return `${QUALITY_PATH}${videoId + 1}_Q${res}.mp4`;
+    }
+    function speedSrc(videoId, speed) {
+      return `${SPEED_PATH}${videoId + 1}_P${speed}.mp4`;
+    }
+    function fetchBlob(src) {
+      if (!blobCache[src]) {
+        blobCache[src] = fetch(src)
+          .then(res => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.blob(); })
+          .then(blob => { console.log('Loaded:', src); return URL.createObjectURL(blob); })
+          .catch(() => { console.error('Error loading video:', src); failedSrcs.add(src); return src; }); // fall back to original URL
+      }
+      return blobCache[src];
+    }
+    function preloadSession(s) {
+      const tasks = [];
+      SESSIONS[s].forEach(id => {
+        tasks.push(fetchBlob(videoSrc(id, BASE_RES)));
+        QUALITIES.forEach(res => {
+          if (USE_BAKED_QUALITY) { if (res !== BASE_RES) tasks.push(fetchBlob(qualSrc(id, res))); }
+          else tasks.push(fetchBlob(videoSrc(id, res)));
+        });
+        LOSS_LEVELS.forEach(l => tasks.push(fetchBlob(lossSrc(id, l))));
+        if (USE_BAKED_SPEED) PLAYBACK_SPEEDS.forEach(sp => tasks.push(fetchBlob(speedSrc(id, sp))));
+      });
+      return Promise.all(tasks);
+    }
+
+    function waitReady(video) {
+      return new Promise(resolve => {
+        if (video.readyState >= 3) return resolve();
+        const done = () => {
+          video.removeEventListener('canplaythrough', done);
+          video.removeEventListener('error', done);
+          resolve();
+        };
+        video.addEventListener('canplaythrough', done);
+        video.addEventListener('error', done);
+        setTimeout(done, 8000); // never block the experiment forever
+      });
+    }
+
+    function makeVideo(url) {
+      const v = document.createElement('video');
+      v.src = url;
+      // Locked-down player: no audio, no controls, no seeking / pausing / PiP / casting by the participant
+      v.muted = true;
+      v.defaultMuted = true;
+      v.volume = 0;
+      v.controls = false;
+      v.removeAttribute('controls');
+      v.disablePictureInPicture = true;
+      v.disableRemotePlayback = true;
+      v.setAttribute('controlsList', 'nodownload nofullscreen noremoteplayback noplaybackrate');
+      v.style.pointerEvents = 'none';
+      v.playsInline = true;
+      v.setAttribute('playsinline', '');
+      v.preload = 'auto';
+      v.load();
+      return v;
+    }
+
+    // Builds the DOM for one clip (hidden) and waits until it can play through.
+    //  - `base`: the video that plays the WHOLE clip (0-10 s):
+    //            720p for every condition, except packet-loss clips where it is the lossy file of that level
+    //  - `alt` : lower-quality video, only used for quality cases; it plays in sync (hidden)
+    //            and is faded in on top of the base video during the middle 4 s.
+    async function prepareClip(clip) {
+      const cond = clip.cond;
+      let baked = USE_BAKED_QUALITY && !cond.loss && cond.res !== BASE_RES;
+      let bakedSpeed = USE_BAKED_SPEED && !cond.loss && cond.speed !== 1;
+      let baseUrl;
+      if (bakedSpeed) {
+        const ss = speedSrc(clip.videoId, cond.speed);
+        baseUrl = await fetchBlob(ss);
+        if (failedSrcs.has(ss)) {           // baked file missing -> old playbackRate method
+          bakedSpeed = false;
+          baseUrl = await fetchBlob(videoSrc(clip.videoId, BASE_RES));
+        }
+      } else if (cond.loss) {
+        baseUrl = await fetchBlob(lossSrc(clip.videoId, cond.loss));
+      } else if (baked) {
+        const qs = qualSrc(clip.videoId, cond.res);
+        baseUrl = await fetchBlob(qs);
+        if (failedSrcs.has(qs)) {           // baked file missing -> fall back to the old two-video overlay (and say so in the log)
+          baked = false;
+          baseUrl = await fetchBlob(videoSrc(clip.videoId, BASE_RES));
+        }
+      } else {
+        baseUrl = await fetchBlob(videoSrc(clip.videoId, BASE_RES));
+      }
+      const needAlt = !baked && !cond.loss && cond.res !== BASE_RES;
+      clip.method = bakedSpeed ? 'baked-speed-file' : (cond.speed !== 1 && !cond.loss) ? 'RATE-FALLBACK' : cond.loss ? 'loss-file' : baked ? 'baked-single-file' : needAlt ? 'OVERLAY-FALLBACK' : 'single-file';
+      const altUrl = needAlt ? await fetchBlob(videoSrc(clip.videoId, cond.res)) : null;
+
+      const el = document.createElement('div');
+      el.className = 'short';
+      const base = makeVideo(baseUrl);
+      el.appendChild(base);
+      let alt = null;
+      if (altUrl) {
+        alt = makeVideo(altUrl);
+        alt.style.opacity = 0;
+        el.appendChild(alt);
+      }
+      shortsContainer.appendChild(el);
+
+      await Promise.all([waitReady(base), alt ? waitReady(alt) : Promise.resolve()]);
+      try { base.currentTime = 0; if (alt) alt.currentTime = 0; } catch (e) {}
+      return { el, base, alt, clip, bakedSpeed };
+    }
+
+    function runClip(p) {
+      return new Promise(resolve => {
+        const { el, base, alt, clip } = p;
+        const cond = clip.cond;
+        const effSpeed = p.bakedSpeed ? 1 : cond.speed;   // baked file already contains the slow part -> play it at 1x all the time
+        let phase = 0;                                   // 0 = head, 1 = middle, 2 = tail
+        let stallState = cond.stall > 0 ? 'pending' : 'none'; // pending -> running -> done
+        let stallMs = 0;
+        let startDelayMs = 0;
+        let raf = null;
+        let finished = false;
+        const startWall = performance.now();
+        let lastGoodTime = 0;      // last playback position that was reached by normal playback
+        let reverting = false;
+
+        // Guards: the participant (or the OS) must not be able to pause, seek or change the speed.
+        base.addEventListener('pause', () => {
+          if (!finished && stallState !== 'running' && !base.ended && el.style.visibility === 'visible') safePlay(base);
+        });
+        base.addEventListener('seeking', () => {
+          if (reverting || finished) return;
+          if (Math.abs(base.currentTime - lastGoodTime) > 0.3) {   // jumped -> put it back
+            reverting = true;
+            base.currentTime = lastGoodTime;
+            setTimeout(() => { reverting = false; }, 100);
+          }
+        });
+
+        const safePlay = v => {
+          const pr = v.play();
+          if (pr && pr.catch) pr.catch(() => { v.muted = true; v.play(); });
+        };
+
+        function finish() {
+          if (finished) return;
+          finished = true;
+          cancelAnimationFrame(raf);
+          base.pause();
+          if (alt) alt.pause();
+          stallSpinner.style.display = 'none';
+          resolve({
+            watchSec: (performance.now() - startWall) / 1000,
+            stallSec: stallMs / 1000,
+            startDelaySec: startDelayMs / 1000,
+            endTime: base.currentTime
+          });
+        }
+
+        function tick() {
+          if (finished) return;
+          const t = base.currentTime;
+
+          const endT = p.bakedSpeed ? ((isFinite(base.duration) ? base.duration : CLIP_DURATION) - 0.03) : (CLIP_DURATION - 0.03);
+          if (base.ended || t >= endT) return finish();
+          if (!base.seeking && !reverting) lastGoodTime = t;
+          { // keep the speed exactly as designed (1x outside the middle 4 s, cond.speed inside it)
+            const wantRate = (phase === 1) ? effSpeed : 1;
+            if (base.playbackRate !== wantRate) base.playbackRate = wantRate;
+          }
+
+          if (stallState !== 'running') {
+            // head -> middle: apply the test condition
+            if (phase === 0 && t >= HEAD_END) {
+              phase = 1;
+              if (effSpeed !== 1) base.playbackRate = effSpeed;
+              if (alt) {
+                // NO seek here: a seek makes the hidden video decode from scratch and shows as a visible hitch.
+                // alt has been playing in sync since the start, so just reveal it.
+                alt.style.opacity = 1; // show lower quality
+              }
+            }
+            // middle -> tail: back to perfect
+            if (phase === 1 && t >= TAIL_START) {
+              phase = 2;
+              base.playbackRate = 1;
+              if (alt) { alt.style.opacity = 0; } // keep it playing (no pause/resume hitches); it is paused in finish()
+            }
+            // keep the low-quality video locked to the base video's clock WITHOUT visible seeks:
+            //  - small drift  -> nudge playbackRate by +-3% (invisible)
+            //  - big drift    -> hard seek, but only while it is hidden (head / tail); in the middle only as a last resort
+            if (alt) {
+              const drift = alt.currentTime - t;           // >0: alt is ahead
+              const ad = Math.abs(drift);
+              if (ad > (phase === 1 ? 0.5 : 0.25)) {
+                alt.currentTime = t;
+                alt.playbackRate = 1;
+              } else if (ad > 0.04) {
+                alt.playbackRate = drift > 0 ? 0.97 : 1.03;
+              } else {
+                alt.playbackRate = 1;
+              }
+            }
+            // stall: freeze the frame for cond.stall seconds (once)
+            if (stallState === 'pending' && t >= STALL_AT) {
+              stallState = 'running';
+              base.pause();
+              if (SHOW_STALL_SPINNER) stallSpinner.style.display = 'flex';
+              const s0 = performance.now();
+              setTimeout(() => {
+                stallMs = performance.now() - s0;
+                stallSpinner.style.display = 'none';
+                stallState = 'done';
+                safePlay(base);
+              }, cond.stall * 1000);
+            }
+          }
+          raf = requestAnimationFrame(tick);
+        }
+
+        // Reveal the clip and start playing it
+        function begin() {
+          el.style.visibility = 'visible';
+          base.playbackRate = 1;
+          if (alt) { alt.playbackRate = 1; alt.style.opacity = 0; }
+          if (alt) safePlay(alt);   // start the hidden video first so both are decoding together
+          safePlay(base);
+          raf = requestAnimationFrame(tick);
+        }
+
+        if (cond.startDelay > 0) {
+          // Start-up delay: the clip stays hidden (black screen) with the spinner, then plays normally
+          if (SHOW_STARTUP_SPINNER) stallSpinner.style.display = 'flex';
+          const d0 = performance.now();
+          setTimeout(() => {
+            startDelayMs = performance.now() - d0;
+            stallSpinner.style.display = 'none';
+            begin();
+          }, cond.startDelay * 1000);
+        } else {
+          begin();
+        }
+      });
+    }
+
+    function disposeClip(p) {
+      try {
+        p.base.pause(); p.base.removeAttribute('src'); p.base.load();
+        if (p.alt) { p.alt.pause(); p.alt.removeAttribute('src'); p.alt.load(); }
+      } catch (e) {}
+      p.el.remove();
+    }
+
+    async function playCurrent() {
+      const clip = plan[globalIndex];
+      const p = await preparedPromise;
+
+      startPage.style.display = 'none';
+      restPage.style.display = 'none';
+      scorePage.style.display = 'none';
+      finishPage.style.display = 'none';
+      shortsContainer.style.display = '';
+
+      logAndBuffer(`--- Session ${clip.session + 1}/${NUM_SESSIONS} | Video ${clip.indexInSession + 1}/${CLIPS_PER_SESSION} | Video ID ${clip.videoId} | Condition ${clip.cond.id} ---`);
+      console.log('Playing:', clip.cond);
+
+      lastStats = await runClip(p);
+      disposeClip(p);
+      showScorePage();
+    }
+
+    function showScorePage() {
+      const clip = plan[globalIndex];
+      shortsContainer.style.display = 'none';
+      scorePage.style.display = 'flex';
+
+      scorePage.querySelector('h1').innerHTML =
+        `Video Quality Evaluation (Session ${clip.session + 1} / ${NUM_SESSIONS})`;
+      const percent = Math.round(((globalIndex + 1) / TOTAL_CLIPS) * 100);
+      document.getElementById('progress-bar').style.width = percent + '%';
+      document.getElementById('progress-text').innerHTML =
+        `Video ${clip.indexInSession + 1} / ${CLIPS_PER_SESSION} &nbsp;|&nbsp; Total ${globalIndex + 1} / ${TOTAL_CLIPS}`;
+
+      // Prepare the next clip while the participant is voting (no playback is disturbed).
+      const nextIdx = globalIndex + 1;
+      if (nextIdx < TOTAL_CLIPS) {
+        nextBtn.disabled = true;
+        nextBtn.style.opacity = '0.5';
+        preparedPromise = prepareClip(plan[nextIdx]);
+        preparedPromise.then(() => {
+          nextBtn.disabled = false;
+          nextBtn.style.opacity = '1';
+        });
+      } else {
+        nextBtn.disabled = false;
+        nextBtn.style.opacity = '1';
+      }
+    }
+
+    // --- Rest period logic (between big sessions) ---
+    function showRestPage(finishedSession, readyPromise, callback) {
+      const resumeBtn = document.getElementById('resume-btn');
+      const timerDiv = document.getElementById('rest-timer');
+      const label = (REST_SECONDS % 60 === 0) ? `${REST_SECONDS / 60}-minute` : `${REST_SECONDS}-second`;
+      document.getElementById('rest-msg').innerHTML =
+        `Session ${finishedSession + 1}/${NUM_SESSIONS} completed.<br>Please take a ${label} break.<br>After the break, press the resume button below to continue.`;
+      restPage.style.display = 'flex';
+      resumeBtn.style.display = 'none';
+      let seconds = REST_SECONDS;
+      timerDiv.textContent = `Time left: ${seconds}s`;
+      const interval = setInterval(async () => {
+        seconds--;
+        timerDiv.textContent = `Time left: ${Math.max(seconds, 0)}s`;
+        if (seconds <= 0) {
+          clearInterval(interval);
+          await readyPromise; // make sure the next session's first clip is loaded
+          resumeBtn.style.display = 'block';
+          resumeBtn.onclick = function () {
+            restPage.style.display = 'none';
+            resumeBtn.style.display = 'none';
+            if (callback) callback();
+          };
+        }
+      }, 1000);
+    }
+
+    // --- Score page submit handler ---
+    scoreForm.onsubmit = function (e) {
+      e.preventDefault();
+      if (nextBtn.disabled) return;
+      const acr = scoreForm.elements['acr'].value;
+      const clip = plan[globalIndex];
+      const cond = clip.cond;
+
+      // Everything needed for analysis is written explicitly (no need to infer from position).
+      logAndBuffer(`Session: ${clip.session + 1}/${NUM_SESSIONS}`);
+      logAndBuffer(`Video Order In Session: ${clip.indexInSession + 1}/${CLIPS_PER_SESSION}`);
+      logAndBuffer(`Global Order: ${globalIndex + 1}/${TOTAL_CLIPS}`);
+      logAndBuffer(`Video ID: ${clip.videoId}`);
+      logAndBuffer(`Condition: ${cond.id}`);
+      logAndBuffer(`Condition Type: ${cond.type}`);
+      logAndBuffer(`Middle Resolution: ${cond.res}`);
+      logAndBuffer(`Middle Playback Speed: ${cond.speed}x`);
+      logAndBuffer(`Stall Time: ${cond.stall}s`);
+      logAndBuffer(`Startup Delay: ${cond.startDelay}s`);
+      logAndBuffer(`Playback Method: ${clip.method || 'unknown'}`);
+      logAndBuffer(`Packet Loss Level: ${cond.loss ? 'L' + cond.loss + ' (nominal ' + LOSS_NOMINAL[cond.loss] + ')' : 'none'}`);
+      logAndBuffer(`Planned Watch Time: ${plannedDuration(cond).toFixed(2)}s`);
+      if (lastStats) {
+        logAndBuffer(`Actual Watch Time: ${lastStats.watchSec.toFixed(2)}s`);
+        logAndBuffer(`Actual Stall Time: ${lastStats.stallSec.toFixed(2)}s`);
+        logAndBuffer(`Actual Startup Delay: ${lastStats.startDelaySec.toFixed(2)}s`);
+      }
+      logAndBuffer(`ACR Score: ${acr}`);
+
+      const finishedClip = clip;
+      globalIndex++;
+      scoreForm.reset();
+
+      if (globalIndex >= TOTAL_CLIPS) {
+        scorePage.style.display = 'none';
+        finishPage.style.display = 'flex';
+        return;
+      }
+
+      const sessionChanged = plan[globalIndex].session !== finishedClip.session;
+      if (sessionChanged) {
+        scorePage.style.display = 'none';
+        showRestPage(finishedClip.session, preparedPromise, () => { playCurrent(); });
+      } else {
+        playCurrent();
+      }
+    };
+
+    // --- Start button ---
+    const startBtn = document.getElementById('start-btn');
+    startBtn.disabled = true;
+    startBtn.style.opacity = '0.5';
+
+    // Preload session 1 before the participant can press Start, then session 2 in the background.
+    preloadSession(0).then(() => {
+      startBtn.disabled = false;
+      startBtn.style.opacity = '1';
+      if (failedSrcs.size > 0) {
+        // Not blocking (so local testing still works), but visible so a wrong path / missing file is noticed.
+        const w = document.getElementById('load-warning');
+        w.style.display = 'block';
+        w.innerHTML = 'Warning: could not preload ' + failedSrcs.size + ' file(s):<br>' + Array.from(failedSrcs).join('<br>');
+      }
+      if (NUM_SESSIONS > 1) {
+        preloadSession(1).then(() => {
+          if (failedSrcs.size > 0) logAndBuffer('WARNING: could not preload: ' + Array.from(failedSrcs).join(', '));
+        });
+      }
+    });
+
+    startBtn.onclick = function () {
+      const name = document.getElementById('name-input').value.trim();
+      const age = document.getElementById('age-input').value.trim();
+      const exp = document.getElementById('exp-input').value.trim();
+      const device = document.getElementById('device-input').value.trim();
+
+      if (!name || !age || !exp || !device) {
+        alert('Please input your name, age, experience, and device name before starting.');
+        return;
+      }
+
+      userName = name || "user";
+      logAndBuffer('User Name:', name);
+      logAndBuffer('User Age:', age);
+      logAndBuffer('Experience (years):', exp);
+      logAndBuffer('Device Name:', device);
+      logAndBuffer('Build: v3-baked-speed-quality');
+      plan.forEach((c, i) => {
+        logAndBuffer(`PLAN ${i + 1}: S${c.session + 1} #${c.indexInSession + 1} video=${c.videoId} cond=${c.cond.id}`);
+      });
+
+      startBtn.disabled = true;
+      startBtn.style.opacity = '0.5';
+      globalIndex = 0;
+      preparedPromise = prepareClip(plan[0]);
+      playCurrent();
+    };
+
+    // --- Download log ---
+    downloadLogBtnFinish.onclick = function () {
+      const safeName = userName.replace(/[^a-zA-Z0-9_\-]/g, "_");
+      const now = new Date();
+      const pad = n => n.toString().padStart(2, '0');
+      const dateStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      const blob = new Blob([logBuffer.join('\n')], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `log_quality_stall_loss_speed_${safeName}_${dateStr}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+  </script>
+</body>
+</html>
