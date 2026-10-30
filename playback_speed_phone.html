@@ -203,6 +203,13 @@
     const USE_BAKED_QUALITY = true;
     const QUALITY_PATH = "./video_resolution/quality/";
 
+    // Slow-motion clips are ALSO pre-rendered as ONE file each (3 s normal | 4 s of source played at <speed> | 3 s normal),
+    // so the browser never changes playbackRate mid-clip (that is what caused the small hitch on phones).
+    // Files: SPEED_PATH + (videoId+1) + "_P" + speed + ".mp4"  e.g. ./video_resolution/speed/91_P0.5.mp4
+    // If a file is missing, the page falls back to the old playbackRate method for that clip (and logs it).
+    const USE_BAKED_SPEED = true;
+    const SPEED_PATH = "./video_resolution/speed/";
+
     // NEW: start-up (initial buffering) delay when the video is opened: black screen + spinner, then the video plays normally
     const STARTUP_DELAYS = [0.5, 1, 2];                       // seconds of black screen before the video starts
 
@@ -218,6 +225,14 @@
       document.addEventListener('gesturestart', stop);
       document.addEventListener('touchmove', e => { if (shortsContainer && shortsContainer.style.display !== 'none') e.preventDefault(); }, { passive: false });
     })();
+
+    // OS-level media controls (notification shade, lock screen, Bluetooth earbuds, keyboard media keys) must do nothing
+    try {
+      if ('mediaSession' in navigator) {
+        ['play', 'pause', 'stop', 'seekbackward', 'seekforward', 'seekto', 'previoustrack', 'nexttrack']
+          .forEach(a => { try { navigator.mediaSession.setActionHandler(a, () => {}); } catch (e) {} });
+      }
+    } catch (e) {}
 
     // Folder for each resolution. Each folder must contain the 10 s version of every video.
     const RES_PATHS = {
@@ -335,6 +350,9 @@
     function qualSrc(videoId, res) {
       return `${QUALITY_PATH}${videoId + 1}_Q${res}.mp4`;
     }
+    function speedSrc(videoId, speed) {
+      return `${SPEED_PATH}${videoId + 1}_P${speed}.mp4`;
+    }
     function fetchBlob(src) {
       if (!blobCache[src]) {
         blobCache[src] = fetch(src)
@@ -353,6 +371,7 @@
           else tasks.push(fetchBlob(videoSrc(id, res)));
         });
         LOSS_LEVELS.forEach(l => tasks.push(fetchBlob(lossSrc(id, l))));
+        if (USE_BAKED_SPEED) PLAYBACK_SPEEDS.forEach(sp => tasks.push(fetchBlob(speedSrc(id, sp))));
       });
       return Promise.all(tasks);
     }
@@ -398,11 +417,30 @@
     //            and is faded in on top of the base video during the middle 4 s.
     async function prepareClip(clip) {
       const cond = clip.cond;
-      const baked = USE_BAKED_QUALITY && !cond.loss && cond.res !== BASE_RES;
-      const baseUrl = await fetchBlob(cond.loss ? lossSrc(clip.videoId, cond.loss)
-                                      : baked ? qualSrc(clip.videoId, cond.res)
-                                      : videoSrc(clip.videoId, BASE_RES));
-      const needAlt = !USE_BAKED_QUALITY && !cond.loss && cond.res !== BASE_RES;
+      let baked = USE_BAKED_QUALITY && !cond.loss && cond.res !== BASE_RES;
+      let bakedSpeed = USE_BAKED_SPEED && !cond.loss && cond.speed !== 1;
+      let baseUrl;
+      if (bakedSpeed) {
+        const ss = speedSrc(clip.videoId, cond.speed);
+        baseUrl = await fetchBlob(ss);
+        if (failedSrcs.has(ss)) {           // baked file missing -> old playbackRate method
+          bakedSpeed = false;
+          baseUrl = await fetchBlob(videoSrc(clip.videoId, BASE_RES));
+        }
+      } else if (cond.loss) {
+        baseUrl = await fetchBlob(lossSrc(clip.videoId, cond.loss));
+      } else if (baked) {
+        const qs = qualSrc(clip.videoId, cond.res);
+        baseUrl = await fetchBlob(qs);
+        if (failedSrcs.has(qs)) {           // baked file missing -> fall back to the old two-video overlay (and say so in the log)
+          baked = false;
+          baseUrl = await fetchBlob(videoSrc(clip.videoId, BASE_RES));
+        }
+      } else {
+        baseUrl = await fetchBlob(videoSrc(clip.videoId, BASE_RES));
+      }
+      const needAlt = !baked && !cond.loss && cond.res !== BASE_RES;
+      clip.method = bakedSpeed ? 'baked-speed-file' : (cond.speed !== 1 && !cond.loss) ? 'RATE-FALLBACK' : cond.loss ? 'loss-file' : baked ? 'baked-single-file' : needAlt ? 'OVERLAY-FALLBACK' : 'single-file';
       const altUrl = needAlt ? await fetchBlob(videoSrc(clip.videoId, cond.res)) : null;
 
       const el = document.createElement('div');
@@ -419,13 +457,14 @@
 
       await Promise.all([waitReady(base), alt ? waitReady(alt) : Promise.resolve()]);
       try { base.currentTime = 0; if (alt) alt.currentTime = 0; } catch (e) {}
-      return { el, base, alt, clip };
+      return { el, base, alt, clip, bakedSpeed };
     }
 
     function runClip(p) {
       return new Promise(resolve => {
         const { el, base, alt, clip } = p;
         const cond = clip.cond;
+        const effSpeed = p.bakedSpeed ? 1 : cond.speed;   // baked file already contains the slow part -> play it at 1x all the time
         let phase = 0;                                   // 0 = head, 1 = middle, 2 = tail
         let stallState = cond.stall > 0 ? 'pending' : 'none'; // pending -> running -> done
         let stallMs = 0;
@@ -433,6 +472,21 @@
         let raf = null;
         let finished = false;
         const startWall = performance.now();
+        let lastGoodTime = 0;      // last playback position that was reached by normal playback
+        let reverting = false;
+
+        // Guards: the participant (or the OS) must not be able to pause, seek or change the speed.
+        base.addEventListener('pause', () => {
+          if (!finished && stallState !== 'running' && !base.ended && el.style.visibility === 'visible') safePlay(base);
+        });
+        base.addEventListener('seeking', () => {
+          if (reverting || finished) return;
+          if (Math.abs(base.currentTime - lastGoodTime) > 0.3) {   // jumped -> put it back
+            reverting = true;
+            base.currentTime = lastGoodTime;
+            setTimeout(() => { reverting = false; }, 100);
+          }
+        });
 
         const safePlay = v => {
           const pr = v.play();
@@ -458,13 +512,19 @@
           if (finished) return;
           const t = base.currentTime;
 
-          if (base.ended || t >= CLIP_DURATION - 0.03) return finish();
+          const endT = p.bakedSpeed ? ((isFinite(base.duration) ? base.duration : CLIP_DURATION) - 0.03) : (CLIP_DURATION - 0.03);
+          if (base.ended || t >= endT) return finish();
+          if (!base.seeking && !reverting) lastGoodTime = t;
+          { // keep the speed exactly as designed (1x outside the middle 4 s, cond.speed inside it)
+            const wantRate = (phase === 1) ? effSpeed : 1;
+            if (base.playbackRate !== wantRate) base.playbackRate = wantRate;
+          }
 
           if (stallState !== 'running') {
             // head -> middle: apply the test condition
             if (phase === 0 && t >= HEAD_END) {
               phase = 1;
-              if (cond.speed !== 1) base.playbackRate = cond.speed;
+              if (effSpeed !== 1) base.playbackRate = effSpeed;
               if (alt) {
                 // NO seek here: a seek makes the hidden video decode from scratch and shows as a visible hitch.
                 // alt has been playing in sync since the start, so just reveal it.
@@ -634,6 +694,7 @@
       logAndBuffer(`Middle Playback Speed: ${cond.speed}x`);
       logAndBuffer(`Stall Time: ${cond.stall}s`);
       logAndBuffer(`Startup Delay: ${cond.startDelay}s`);
+      logAndBuffer(`Playback Method: ${clip.method || 'unknown'}`);
       logAndBuffer(`Packet Loss Level: ${cond.loss ? 'L' + cond.loss + ' (nominal ' + LOSS_NOMINAL[cond.loss] + ')' : 'none'}`);
       logAndBuffer(`Planned Watch Time: ${plannedDuration(cond).toFixed(2)}s`);
       if (lastStats) {
