@@ -197,8 +197,27 @@
     const LOSS_NOMINAL = { 1: "0.1%", 2: "0.5%", 3: "1.0%" };  // nominal loss rate inside the lossy 4 s (only used for the log)
     const LOSS_PATH    = "./video_resolution/loss/";
 
+    // Quality-switch clips are PRE-RENDERED as ONE file each (3 s 720p | 4 s low quality | 3 s 720p), so there is
+    // no overlay/sync at runtime and therefore no hitch at the switch. Files: QUALITY_PATH + (videoId+1) + "_Q" + res + ".mp4"
+    // e.g. ./video_resolution/quality/91_Q480p.mp4. Set to false to go back to the old two-video overlay.
+    const USE_BAKED_QUALITY = true;
+    const QUALITY_PATH = "./video_resolution/quality/";
+
     // NEW: start-up (initial buffering) delay when the video is opened: black screen + spinner, then the video plays normally
     const STARTUP_DELAYS = [0.5, 1, 2];                       // seconds of black screen before the video starts
+
+    // Block every way a participant could interact with the playing clip (keys, context menu, double-tap, touch gestures)
+    (function lockInteraction() {
+      const stop = e => { if (e.target && e.target.closest && e.target.closest('input, textarea, button, select, label, form')) return; e.preventDefault(); };
+      document.addEventListener('keydown', e => {
+        if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return; // typing in the start form still works
+        if ([' ', 'Spacebar', 'k', 'K', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'j', 'l', 'm', 'f', 'Home', 'End', 'MediaPlayPause'].includes(e.key)) e.preventDefault();
+      }, true);
+      document.addEventListener('contextmenu', stop);
+      document.addEventListener('dblclick', stop);
+      document.addEventListener('gesturestart', stop);
+      document.addEventListener('touchmove', e => { if (shortsContainer && shortsContainer.style.display !== 'none') e.preventDefault(); }, { passive: false });
+    })();
 
     // Folder for each resolution. Each folder must contain the 10 s version of every video.
     const RES_PATHS = {
@@ -313,6 +332,9 @@
     function lossSrc(videoId, level) {
       return `${LOSS_PATH}${videoId + 1}_L${level}.mp4`;
     }
+    function qualSrc(videoId, res) {
+      return `${QUALITY_PATH}${videoId + 1}_Q${res}.mp4`;
+    }
     function fetchBlob(src) {
       if (!blobCache[src]) {
         blobCache[src] = fetch(src)
@@ -326,7 +348,10 @@
       const tasks = [];
       SESSIONS[s].forEach(id => {
         tasks.push(fetchBlob(videoSrc(id, BASE_RES)));
-        QUALITIES.forEach(res => tasks.push(fetchBlob(videoSrc(id, res))));
+        QUALITIES.forEach(res => {
+          if (USE_BAKED_QUALITY) { if (res !== BASE_RES) tasks.push(fetchBlob(qualSrc(id, res))); }
+          else tasks.push(fetchBlob(videoSrc(id, res)));
+        });
         LOSS_LEVELS.forEach(l => tasks.push(fetchBlob(lossSrc(id, l))));
       });
       return Promise.all(tasks);
@@ -349,7 +374,16 @@
     function makeVideo(url) {
       const v = document.createElement('video');
       v.src = url;
+      // Locked-down player: no audio, no controls, no seeking / pausing / PiP / casting by the participant
       v.muted = true;
+      v.defaultMuted = true;
+      v.volume = 0;
+      v.controls = false;
+      v.removeAttribute('controls');
+      v.disablePictureInPicture = true;
+      v.disableRemotePlayback = true;
+      v.setAttribute('controlsList', 'nodownload nofullscreen noremoteplayback noplaybackrate');
+      v.style.pointerEvents = 'none';
       v.playsInline = true;
       v.setAttribute('playsinline', '');
       v.preload = 'auto';
@@ -364,8 +398,11 @@
     //            and is faded in on top of the base video during the middle 4 s.
     async function prepareClip(clip) {
       const cond = clip.cond;
-      const baseUrl = await fetchBlob(cond.loss ? lossSrc(clip.videoId, cond.loss) : videoSrc(clip.videoId, BASE_RES));
-      const needAlt = !cond.loss && cond.res !== BASE_RES;
+      const baked = USE_BAKED_QUALITY && !cond.loss && cond.res !== BASE_RES;
+      const baseUrl = await fetchBlob(cond.loss ? lossSrc(clip.videoId, cond.loss)
+                                      : baked ? qualSrc(clip.videoId, cond.res)
+                                      : videoSrc(clip.videoId, BASE_RES));
+      const needAlt = !USE_BAKED_QUALITY && !cond.loss && cond.res !== BASE_RES;
       const altUrl = needAlt ? await fetchBlob(videoSrc(clip.videoId, cond.res)) : null;
 
       const el = document.createElement('div');
@@ -505,7 +542,6 @@
       p.el.remove();
     }
 
-    // FLOW CONTROL
     async function playCurrent() {
       const clip = plan[globalIndex];
       const p = await preparedPromise;
