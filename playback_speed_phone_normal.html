@@ -287,7 +287,6 @@
       PLAYBACK_SPEEDS.forEach(p => c.push(Object.assign({}, base, { id: `P_${p}x`, type: 'speed', speed: p })));
       LOSS_LEVELS.forEach(l => c.push(Object.assign({}, base, { id: `LOSS_L${l}`, type: 'loss', loss: l })));
       STARTUP_DELAYS.forEach(d => c.push(Object.assign({}, base, { id: `D_${d}s`, type: 'startup', startDelay: d })));
-      c.push(Object.assign({}, base, { id: 'PERFECT', type: 'perfect' })); // 720p, 1x, no stall for the full video
       return c;
     }
 
