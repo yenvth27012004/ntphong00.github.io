@@ -68,7 +68,33 @@
       object-fit: cover;
       display: block;
       background: #000;
+      pointer-events: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
     }
+
+    /* The video must show NOTHING but the picture: hide every native media control (play/pause, seek bar,
+       volume/mute, fullscreen, PiP, cast, the big start-playback overlay). */
+    video::-webkit-media-controls { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-enclosure { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-panel { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-overlay-enclosure { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-overlay-play-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-start-playback-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-play-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-timeline { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-timeline-container { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-current-time-display { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-time-remaining-display { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-mute-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-volume-slider { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-volume-slider-container { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-fullscreen-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-toggle-closed-captions-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-picture-in-picture-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-overlay-cast-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-internal-media-controls-overlay-cast-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
 
     /* --- Buffering spinner (used for the mid-clip stall AND the start-up delay) --- */
     #stall-spinner {
@@ -131,8 +157,8 @@
     <button id="download-log-btn-finish" style="font-size:1.2rem;padding:12px 32px;border-radius:8px;border:none;background:#222;color:#fff;cursor:pointer;">Download Log</button>
     <div style="margin-top:32px;color:#fff;font-size:1.1rem;text-align:center;">
       Please upload your downloaded log file to:<br>
-      <a href="https://drive.google.com/drive/folders/1zjsYvar1mtPHSSLkmkLd86HrTPxi_x91" target="_blank" style="color:#4af;text-decoration:underline;">
-        https://drive.google.com/drive/folders/1zjsYvar1mtPHSSLkmkLd86HrTPxi_x91
+      <a href="https://drive.google.com/drive/folders/1BRxLc0jS_SFxjNz3-JeL44CBwAL40OUX?usp=sharing" target="_blank" style="color:#4af;text-decoration:underline;">
+        https://drive.google.com/drive/folders/1BRxLc0jS_SFxjNz3-JeL44CBwAL40OUX?usp=sharing
       </a>
     </div>
   </div>
@@ -229,11 +255,14 @@
       document.addEventListener('touchmove', e => { if (shortsContainer && shortsContainer.style.display !== 'none') e.preventDefault(); }, { passive: false });
     })();
 
-    // OS-level media controls (notification shade, lock screen, Bluetooth earbuds, keyboard media keys) must do nothing
+    // OS / browser media panel (notification shade, lock screen, earbuds, media keys): show NOTHING.
+    // Registering handlers (even empty ones) is what makes such a panel display play/pause/seek/previous/next buttons,
+    // so every handler is removed and there is no title. A pause forced from outside is still undone by the 'pause' guard in runClip.
     try {
       if ('mediaSession' in navigator) {
-        ['play', 'pause', 'stop', 'seekbackward', 'seekforward', 'seekto', 'previoustrack', 'nexttrack']
-          .forEach(a => { try { navigator.mediaSession.setActionHandler(a, () => {}); } catch (e) {} });
+        navigator.mediaSession.metadata = null;
+        ['play', 'pause', 'stop', 'seekbackward', 'seekforward', 'seekto', 'previoustrack', 'nexttrack', 'skipad']
+          .forEach(a => { try { navigator.mediaSession.setActionHandler(a, null); } catch (e) {} });
       }
     } catch (e) {}
 
@@ -296,7 +325,7 @@
       return seq;
     }
 
-    // SINGLE SOURCE OF TRUTH for the whole experiment: 2 big sessions x (3 videos x 18 conditions)
+    // SINGLE SOURCE OF TRUTH for the whole experiment: 2 big sessions x (3 videos x 23 conditions)
     const SESSIONS = [];
     for (let s = 0; s * VIDEOS_PER_SESSION < VIDEO_IDS.length; s++) {
       SESSIONS.push(VIDEO_IDS.slice(s * VIDEOS_PER_SESSION, (s + 1) * VIDEOS_PER_SESSION));
@@ -395,19 +424,30 @@
 
     function makeVideo(url) {
       const v = document.createElement('video');
-      v.src = url;
-      // Locked-down player: no audio, no controls, no seeking / pausing / PiP / casting by the participant
+      // Plain picture only: no audio, no controls of any kind, no seeking / pausing / PiP / casting / AirPlay / fullscreen.
+      // Every attribute is set BEFORE src, so no browser has already decided to open its own player.
+      v.removeAttribute('controls');
+      v.controls = false;
+      v.setAttribute('muted', '');
       v.muted = true;
       v.defaultMuted = true;
-      v.volume = 0;
-      v.controls = false;
-      v.removeAttribute('controls');
-      v.disablePictureInPicture = true;
-      v.disableRemotePlayback = true;
-      v.setAttribute('controlsList', 'nodownload nofullscreen noremoteplayback noplaybackrate');
-      v.style.pointerEvents = 'none';
-      v.playsInline = true;
+      try { v.volume = 0; } catch (e) {}
       v.setAttribute('playsinline', '');
+      v.setAttribute('webkit-playsinline', '');
+      v.playsInline = true;
+      v.setAttribute('disablepictureinpicture', '');
+      v.disablePictureInPicture = true;
+      v.setAttribute('disableremoteplayback', '');
+      v.disableRemotePlayback = true;
+      v.setAttribute('x-webkit-airplay', 'deny');
+      v.setAttribute('controlsList', 'nodownload nofullscreen noremoteplayback noplaybackrate');
+      v.setAttribute('tabindex', '-1');
+      v.setAttribute('aria-hidden', 'true');
+      v.style.pointerEvents = 'none';
+      // If anything ever un-mutes it, put it back at once.
+      v.addEventListener('volumechange', () => { if (!v.muted) { v.muted = true; try { v.volume = 0; } catch (e) {} } });
+      v.addEventListener('contextmenu', e => e.preventDefault());
+      v.src = url;
       v.preload = 'auto';
       v.load();
       return v;
