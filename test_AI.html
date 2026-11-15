@@ -59,7 +59,10 @@
       visibility: hidden; /* shown by JS only when the clip starts */
     }
 
-    .short video {
+    /* What the participant sees is a <canvas>: there is no visible <video> element a browser could attach its own
+       player UI (play/pause, seek bar, volume, ...) or sound controls to. The real <video> elements only DECODE:
+       2 px, almost transparent, never receiving touches. */
+    .short canvas {
       position: absolute;
       top: 0;
       left: 0;
@@ -68,7 +71,46 @@
       object-fit: cover;
       display: block;
       background: #000;
+      pointer-events: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
     }
+
+    .short video {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 2px;
+      height: 2px;
+      opacity: 0.01;
+      display: block;
+      pointer-events: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    /* Belt and braces: even if a browser forces its controls onto those 2 px videos, hide every native control. */
+    video::-webkit-media-controls { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-enclosure { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-panel { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-overlay-enclosure { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-overlay-play-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-start-playback-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-play-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-timeline { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-timeline-container { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-current-time-display { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-time-remaining-display { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-mute-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-volume-slider { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-volume-slider-container { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-fullscreen-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-toggle-closed-captions-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-picture-in-picture-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-webkit-media-controls-overlay-cast-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
+    video::-internal-media-controls-overlay-cast-button { display: none !important; visibility: hidden !important; opacity: 0 !important; -webkit-appearance: none; }
 
     /* --- Buffering spinner (used for the mid-clip stall AND the start-up delay) --- */
     #stall-spinner {
@@ -121,8 +163,8 @@
     <input id="device-input" type="text" required style="font-size:1.2rem;padding:8px 12px;border-radius:8px;border:none;margin-bottom:32px;width:200px;">
     <!-- Shown only if some video file could not be preloaded (wrong path / missing file) -->
     <div id="load-warning" style="display:none;color:#ff6b6b;font-size:0.9rem;max-width:90vw;margin-bottom:16px;text-align:center;word-break:break-all;"></div>
+    <div id="build-info" style="display:none;color:#888;font-size:0.7rem;max-width:90vw;margin-bottom:12px;text-align:center;word-break:break-all;"></div>
     <button id="start-btn" style="font-size:2rem;padding:16px 48px;border-radius:12px;border:none;background:#ff0000;color:#fff;cursor:pointer;">Start</button>
-    <div style="color:#555;font-size:0.75rem;margin-top:16px;">build v3-baked-speed-quality (2026-10-30)</div>
   </div>
 
   <!-- Finish page -->
@@ -132,8 +174,8 @@
     <button id="download-log-btn-finish" style="font-size:1.2rem;padding:12px 32px;border-radius:8px;border:none;background:#222;color:#fff;cursor:pointer;">Download Log</button>
     <div style="margin-top:32px;color:#fff;font-size:1.1rem;text-align:center;">
       Please upload your downloaded log file to:<br>
-      <a href="https://drive.google.com/drive/folders/1BRxLc0jS_SFxjNz3-JeL44CBwAL40OUX?usp=sharing" target="_blank" style="color:#4af;text-decoration:underline;">
-        https://drive.google.com/drive/folders/1BRxLc0jS_SFxjNz3-JeL44CBwAL40OUX?usp=sharing
+      <a href="https://drive.google.com/drive/folders/1Rntnl6Pf5eDNgSBJfe-df2eaG1BJqFt8" target="_blank" style="color:#4af;text-decoration:underline;">
+        https://drive.google.com/drive/folders/1Rntnl6Pf5eDNgSBJfe-df2eaG1BJqFt8
       </a>
     </div>
   </div>
@@ -171,10 +213,15 @@
   <script>
 
 
-    // 6 fixed video IDs (0-indexed; file name = ID+1).
+    // 6 AI videos, identified by NAME (file names are built from the name, see the *Src() functions below).
     // Big session 1 = first 3 videos, big session 2 = last 3 videos.
-    const VIDEO_IDS = [90, 111, 114, 112, 93, 154];   // -> files 91, 112, 115, 113, 94, 155
+    const VIDEO_IDS = ["animal_AI", "baby_AI", "dance_AI", "mama_AI", "mt_AI", "story_AI"];
     const VIDEOS_PER_SESSION = 3;
+    // Tag written into the log and into the log file name, so the logs of the two links can be told apart.
+    const VIDEO_SET = "ai6";
+    // Version of this page. It is written into every log, and shown on the Start page when the link ends with ?debug
+    // (use it to be sure the phone is not running an old cached copy of the page).
+    const BUILD_TAG = "2026-11-15-canvas";
 
     // Each source video is exactly 10 s: [0-3s] perfect | [3-7s] impaired | [7-10s] perfect
     const CLIP_DURATION = 10;
@@ -188,31 +235,32 @@
     const BASE_RES = "720p";
 
     // Factors tested in the 4 s middle part
-    const QUALITIES        = ["720p", "480p", "240p"];       // quality in the middle part
-    const STALL_TIMES      = [0.5, 1, 2];                    // seconds of freeze in the middle of the clip
+    const QUALITIES        = ["720p", "480p", "360p", "240p", "144p"]; // quality in the middle part
+    const STALL_TIMES      = [0.5, 1, 2, 4];                 // seconds of freeze in the middle of the clip
     const PLAYBACK_SPEEDS  = [0.9, 0.8, 0.7, 0.6, 0.5];     // speed in the middle part
 
     // NEW: packet-loss versions. The loss is already baked into the files (loss only in the middle 4 s).
-    // Files: LOSS_PATH + (videoId+1) + "_L" + level + ".mp4"   e.g. ./video_resolution/loss/91_L2.mp4
-    const LOSS_LEVELS  = [1, 2, 3];
-    const LOSS_NOMINAL = { 1: "0.1%", 2: "0.5%", 3: "1.0%" };  // nominal loss rate inside the lossy 4 s (only used for the log)
+    // Files: LOSS_PATH + videoId + "_720_L" + level + ".mp4"   e.g. ./video_resolution/loss/animal_AI_720_L0.mp4 (L0 = 0.05%)
+    // L0 = 0.05% (NEW), L1 = 0.1%, L2 = 0.5%, L3 = 1.0%.  NOTE: level 0 is a REAL loss level, so "no loss" is represented by null.
+    const LOSS_LEVELS  = [0, 1, 2, 3];
+    const LOSS_NOMINAL = { 0: "0.05%", 1: "0.1%", 2: "0.5%", 3: "1.0%" };  // nominal loss rate inside the lossy 4 s (only used for the log)
     const LOSS_PATH    = "./video_resolution/loss/";
 
     // Quality-switch clips are PRE-RENDERED as ONE file each (3 s 720p | 4 s low quality | 3 s 720p), so there is
-    // no overlay/sync at runtime and therefore no hitch at the switch. Files: QUALITY_PATH + (videoId+1) + "_Q" + res + ".mp4"
-    // e.g. ./video_resolution/quality/91_Q480p.mp4. Set to false to go back to the old two-video overlay.
+    // no overlay/sync at runtime and therefore no hitch at the switch. Files: QUALITY_PATH + videoId + "_Q" + res + ".mp4"
+    // e.g. ./video_resolution/quality/animal_AI_Q480p.mp4. Set to false to go back to the old two-video overlay.
     const USE_BAKED_QUALITY = true;
     const QUALITY_PATH = "./video_resolution/quality/";
 
     // Slow-motion clips are ALSO pre-rendered as ONE file each (3 s normal | 4 s of source played at <speed> | 3 s normal),
     // so the browser never changes playbackRate mid-clip (that is what caused the small hitch on phones).
-    // Files: SPEED_PATH + (videoId+1) + "_P" + speed + ".mp4"  e.g. ./video_resolution/speed/91_P0.5.mp4
+    // Files: SPEED_PATH + videoId + "_P" + speed + ".mp4"  e.g. ./video_resolution/speed/animal_AI_P0.5.mp4
     // If a file is missing, the page falls back to the old playbackRate method for that clip (and logs it).
     const USE_BAKED_SPEED = true;
     const SPEED_PATH = "./video_resolution/speed/";
 
     // NEW: start-up (initial buffering) delay when the video is opened: black screen + spinner, then the video plays normally
-    const STARTUP_DELAYS = [0.5, 1, 2];                       // seconds of black screen before the video starts
+    const STARTUP_DELAYS = [0.5, 1, 2, 4];                    // seconds of black screen before the video starts
 
     // Block every way a participant could interact with the playing clip (keys, context menu, double-tap, touch gestures)
     (function lockInteraction() {
@@ -227,11 +275,14 @@
       document.addEventListener('touchmove', e => { if (shortsContainer && shortsContainer.style.display !== 'none') e.preventDefault(); }, { passive: false });
     })();
 
-    // OS-level media controls (notification shade, lock screen, Bluetooth earbuds, keyboard media keys) must do nothing
+    // OS / browser media panel (notification shade, lock screen, earbuds, media keys): show NOTHING.
+    // Registering handlers (even empty ones) is what makes such a panel display play/pause/seek/previous/next buttons,
+    // so every handler is removed and there is no title. A pause forced from outside is still undone by the 'pause' guard in runClip.
     try {
       if ('mediaSession' in navigator) {
-        ['play', 'pause', 'stop', 'seekbackward', 'seekforward', 'seekto', 'previoustrack', 'nexttrack']
-          .forEach(a => { try { navigator.mediaSession.setActionHandler(a, () => {}); } catch (e) {} });
+        navigator.mediaSession.metadata = null;
+        ['play', 'pause', 'stop', 'seekbackward', 'seekforward', 'seekto', 'previoustrack', 'nexttrack', 'skipad']
+          .forEach(a => { try { navigator.mediaSession.setActionHandler(a, null); } catch (e) {} });
       }
     } catch (e) {}
 
@@ -250,7 +301,7 @@
 
     function buildConditions() {
       const c = [];
-      const base = { res: BASE_RES, speed: 1, stall: 0, startDelay: 0, loss: 0 };
+      const base = { res: BASE_RES, speed: 1, stall: 0, startDelay: 0, loss: null };  // loss: null = no packet loss
       QUALITIES.forEach(q => c.push(Object.assign({}, base, { id: `Q_${q}`, type: 'quality', res: q })));
       STALL_TIMES.forEach(t => c.push(Object.assign({}, base, { id: `T_${t}s`, type: 'stall', stall: t })));
       PLAYBACK_SPEEDS.forEach(p => c.push(Object.assign({}, base, { id: `P_${p}x`, type: 'speed', speed: p })));
@@ -271,7 +322,7 @@
 
     // Builds the ordered clip list of ONE big session:
     //  - the 3 videos rotate in a FIXED order (A,B,C,A,B,C,...) -> the same video is never played back-to-back
-    //  - the condition of each video is shuffled independently (each video gets all 18 conditions once)
+    //  - the condition of each video is shuffled independently (each video gets all 23 conditions once)
     //  - two consecutive clips never share the same condition either
     function buildSessionPlan(videoIds) {
       const conds = buildConditions();
@@ -294,7 +345,7 @@
       return seq;
     }
 
-    // SINGLE SOURCE OF TRUTH for the whole experiment: 2 big sessions x (3 videos x 18 conditions)
+    // SINGLE SOURCE OF TRUTH for the whole experiment: 2 big sessions x (3 videos x 23 conditions)
     const SESSIONS = [];
     for (let s = 0; s * VIDEOS_PER_SESSION < VIDEO_IDS.length; s++) {
       SESSIONS.push(VIDEO_IDS.slice(s * VIDEOS_PER_SESSION, (s + 1) * VIDEOS_PER_SESSION));
@@ -335,6 +386,11 @@
     const stallSpinner = document.getElementById('stall-spinner');
     const downloadLogBtnFinish = document.getElementById('download-log-btn-finish');
 
+    // The playing screen ignores every touch / click / long-press / drag.
+    ['touchstart', 'touchend', 'touchcancel', 'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick',
+     'contextmenu', 'dragstart', 'selectstart', 'gesturestart', 'gesturechange', 'wheel']
+      .forEach(ev => shortsContainer.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); }, { passive: false }));
+
     let userName = "";
     let globalIndex = 0;          // index in `plan` of the clip being played / rated
     let preparedPromise = null;   // promise of the prepared (preloaded) clip for `globalIndex`
@@ -342,17 +398,19 @@
 
     const blobCache = {};
     const failedSrcs = new Set();
+    // File names of the AI videos: <name>_<resolution>.mp4 inside each resolution folder,
+    // e.g. ./video_resolution/144p/dance_AI_144p.mp4  (the 720p folder holds animal_AI_720p.mp4)
     function videoSrc(videoId, res) {
-      return `${RES_PATHS[res]}${videoId + 1}.mp4`;
+      return `${RES_PATHS[res]}${videoId}_${res}.mp4`;
     }
     function lossSrc(videoId, level) {
-      return `${LOSS_PATH}${videoId + 1}_L${level}.mp4`;
+      return `${LOSS_PATH}${videoId}_720_L${level}.mp4`;      // e.g. animal_AI_720_L0.mp4
     }
     function qualSrc(videoId, res) {
-      return `${QUALITY_PATH}${videoId + 1}_Q${res}.mp4`;
+      return `${QUALITY_PATH}${videoId}_Q${res}.mp4`;         // e.g. animal_AI_Q480p.mp4
     }
     function speedSrc(videoId, speed) {
-      return `${SPEED_PATH}${videoId + 1}_P${speed}.mp4`;
+      return `${SPEED_PATH}${videoId}_P${speed}.mp4`;         // e.g. animal_AI_P0.5.mp4
     }
     function fetchBlob(src) {
       if (!blobCache[src]) {
@@ -393,19 +451,30 @@
 
     function makeVideo(url) {
       const v = document.createElement('video');
-      v.src = url;
-      // Locked-down player: no audio, no controls, no seeking / pausing / PiP / casting by the participant
+      // Plain picture only: no audio, no controls of any kind, no seeking / pausing / PiP / casting / AirPlay / fullscreen.
+      // Every attribute is set BEFORE src, so no browser has already decided to open its own player.
+      v.removeAttribute('controls');
+      v.controls = false;
+      v.setAttribute('muted', '');
       v.muted = true;
       v.defaultMuted = true;
-      v.volume = 0;
-      v.controls = false;
-      v.removeAttribute('controls');
-      v.disablePictureInPicture = true;
-      v.disableRemotePlayback = true;
-      v.setAttribute('controlsList', 'nodownload nofullscreen noremoteplayback noplaybackrate');
-      v.style.pointerEvents = 'none';
-      v.playsInline = true;
+      try { v.volume = 0; } catch (e) {}
       v.setAttribute('playsinline', '');
+      v.setAttribute('webkit-playsinline', '');
+      v.playsInline = true;
+      v.setAttribute('disablepictureinpicture', '');
+      v.disablePictureInPicture = true;
+      v.setAttribute('disableremoteplayback', '');
+      v.disableRemotePlayback = true;
+      v.setAttribute('x-webkit-airplay', 'deny');
+      v.setAttribute('controlsList', 'nodownload nofullscreen noremoteplayback noplaybackrate');
+      v.setAttribute('tabindex', '-1');
+      v.setAttribute('aria-hidden', 'true');
+      v.style.pointerEvents = 'none';
+      // If anything ever un-mutes it, put it back at once.
+      v.addEventListener('volumechange', () => { if (!v.muted) { v.muted = true; try { v.volume = 0; } catch (e) {} } });
+      v.addEventListener('contextmenu', e => e.preventDefault());
+      v.src = url;
       v.preload = 'auto';
       v.load();
       return v;
@@ -418,8 +487,9 @@
     //            and is faded in on top of the base video during the middle 4 s.
     async function prepareClip(clip) {
       const cond = clip.cond;
-      let baked = USE_BAKED_QUALITY && !cond.loss && cond.res !== BASE_RES;
-      let bakedSpeed = USE_BAKED_SPEED && !cond.loss && cond.speed !== 1;
+      const isLoss = cond.loss !== null;   // loss level 0 (= 0.05%) is a real level: never test cond.loss for truthiness
+      let baked = USE_BAKED_QUALITY && !isLoss && cond.res !== BASE_RES;
+      let bakedSpeed = USE_BAKED_SPEED && !isLoss && cond.speed !== 1;
       let baseUrl;
       if (bakedSpeed) {
         const ss = speedSrc(clip.videoId, cond.speed);
@@ -428,7 +498,7 @@
           bakedSpeed = false;
           baseUrl = await fetchBlob(videoSrc(clip.videoId, BASE_RES));
         }
-      } else if (cond.loss) {
+      } else if (isLoss) {
         baseUrl = await fetchBlob(lossSrc(clip.videoId, cond.loss));
       } else if (baked) {
         const qs = qualSrc(clip.videoId, cond.res);
@@ -440,8 +510,8 @@
       } else {
         baseUrl = await fetchBlob(videoSrc(clip.videoId, BASE_RES));
       }
-      const needAlt = !baked && !cond.loss && cond.res !== BASE_RES;
-      clip.method = bakedSpeed ? 'baked-speed-file' : (cond.speed !== 1 && !cond.loss) ? 'RATE-FALLBACK' : cond.loss ? 'loss-file' : baked ? 'baked-single-file' : needAlt ? 'OVERLAY-FALLBACK' : 'single-file';
+      const needAlt = !baked && !isLoss && cond.res !== BASE_RES;
+      clip.method = bakedSpeed ? 'baked-speed-file' : (cond.speed !== 1 && !isLoss) ? 'RATE-FALLBACK' : isLoss ? 'loss-file' : baked ? 'baked-single-file' : needAlt ? 'OVERLAY-FALLBACK' : 'single-file';
       const altUrl = needAlt ? await fetchBlob(videoSrc(clip.videoId, cond.res)) : null;
 
       const el = document.createElement('div');
@@ -451,19 +521,25 @@
       let alt = null;
       if (altUrl) {
         alt = makeVideo(altUrl);
-        alt.style.opacity = 0;
         el.appendChild(alt);
       }
       shortsContainer.appendChild(el);
 
       await Promise.all([waitReady(base), alt ? waitReady(alt) : Promise.resolve()]);
       try { base.currentTime = 0; if (alt) alt.currentTime = 0; } catch (e) {}
-      return { el, base, alt, clip, bakedSpeed };
+      // The participant only ever sees this canvas (the <video> elements are 2 px and almost transparent).
+      const canvas = document.createElement('canvas');
+      canvas.width = base.videoWidth || 720;
+      canvas.height = base.videoHeight || 1280;
+      el.appendChild(canvas);
+      const ctx = canvas.getContext('2d', { alpha: false });
+      try { ctx.drawImage(base, 0, 0, canvas.width, canvas.height); } catch (e) {}   // first frame, so there is no black flash
+      return { el, base, alt, clip, bakedSpeed, canvas, ctx };
     }
 
     function runClip(p) {
       return new Promise(resolve => {
-        const { el, base, alt, clip } = p;
+        const { el, base, alt, clip, canvas, ctx } = p;
         const cond = clip.cond;
         const effSpeed = p.bakedSpeed ? 1 : cond.speed;   // baked file already contains the slow part -> play it at 1x all the time
         let phase = 0;                                   // 0 = head, 1 = middle, 2 = tail
@@ -475,6 +551,15 @@
         const startWall = performance.now();
         let lastGoodTime = 0;      // last playback position that was reached by normal playback
         let reverting = false;
+        let lastTickT = 0, maxGapMs = 0, longGaps = 0;   // smoothness check of the page itself (written to the log)
+
+        // Paint the current picture on the canvas. Every animation frame; during a stall the video is paused, so the same
+        // frame is repainted = frozen picture. In the low-quality part of an overlay-style quality clip the picture comes from `alt`.
+        function drawFrame() {
+          const src = (alt && phase === 1) ? alt : base;
+          if (src.readyState < 2) return;
+          try { ctx.drawImage(src, 0, 0, canvas.width, canvas.height); } catch (e) {}
+        }
 
         // Guards: the participant (or the OS) must not be able to pause, seek or change the speed.
         base.addEventListener('pause', () => {
@@ -505,12 +590,21 @@
             watchSec: (performance.now() - startWall) / 1000,
             stallSec: stallMs / 1000,
             startDelaySec: startDelayMs / 1000,
-            endTime: base.currentTime
+            endTime: base.currentTime,
+            renderMaxGapMs: maxGapMs,
+            renderLongGaps: longGaps
           });
         }
 
         function tick() {
           if (finished) return;
+          const nowT = performance.now();
+          if (lastTickT && stallState !== 'running' && !base.paused) {   // gap between two page frames while the clip is playing
+            const gap = nowT - lastTickT;
+            if (gap > maxGapMs) maxGapMs = gap;
+            if (gap > 80) longGaps++;
+          }
+          lastTickT = nowT;
           const t = base.currentTime;
 
           const endT = p.bakedSpeed ? ((isFinite(base.duration) ? base.duration : CLIP_DURATION) - 0.03) : (CLIP_DURATION - 0.03);
@@ -529,14 +623,14 @@
               if (alt) {
                 // NO seek here: a seek makes the hidden video decode from scratch and shows as a visible hitch.
                 // alt has been playing in sync since the start, so just reveal it.
-                alt.style.opacity = 1; // show lower quality
+                // (drawFrame() now takes its picture from alt)
               }
             }
             // middle -> tail: back to perfect
             if (phase === 1 && t >= TAIL_START) {
               phase = 2;
               base.playbackRate = 1;
-              if (alt) { alt.style.opacity = 0; } // keep it playing (no pause/resume hitches); it is paused in finish()
+              // drawFrame() is back on the base video; alt keeps playing (no pause/resume hitches) and is paused in finish()
             }
             // keep the low-quality video locked to the base video's clock WITHOUT visible seeks:
             //  - small drift  -> nudge playbackRate by +-3% (invisible)
@@ -567,6 +661,7 @@
               }, cond.stall * 1000);
             }
           }
+          drawFrame();
           raf = requestAnimationFrame(tick);
         }
 
@@ -574,8 +669,9 @@
         function begin() {
           el.style.visibility = 'visible';
           base.playbackRate = 1;
-          if (alt) { alt.playbackRate = 1; alt.style.opacity = 0; }
+          if (alt) { alt.playbackRate = 1; }
           if (alt) safePlay(alt);   // start the hidden video first so both are decoding together
+          drawFrame();
           safePlay(base);
           raf = requestAnimationFrame(tick);
         }
@@ -696,12 +792,14 @@
       logAndBuffer(`Stall Time: ${cond.stall}s`);
       logAndBuffer(`Startup Delay: ${cond.startDelay}s`);
       logAndBuffer(`Playback Method: ${clip.method || 'unknown'}`);
-      logAndBuffer(`Packet Loss Level: ${cond.loss ? 'L' + cond.loss + ' (nominal ' + LOSS_NOMINAL[cond.loss] + ')' : 'none'}`);
+      logAndBuffer(`Packet Loss Level: ${cond.loss !== null ? 'L' + cond.loss + ' (nominal ' + LOSS_NOMINAL[cond.loss] + ')' : 'none'}`);
       logAndBuffer(`Planned Watch Time: ${plannedDuration(cond).toFixed(2)}s`);
       if (lastStats) {
         logAndBuffer(`Actual Watch Time: ${lastStats.watchSec.toFixed(2)}s`);
         logAndBuffer(`Actual Stall Time: ${lastStats.stallSec.toFixed(2)}s`);
         logAndBuffer(`Actual Startup Delay: ${lastStats.startDelaySec.toFixed(2)}s`);
+        logAndBuffer(`Render Max Frame Gap: ${lastStats.renderMaxGapMs.toFixed(0)}ms`);
+        logAndBuffer(`Render Long Gaps (>80ms): ${lastStats.renderLongGaps}`);
       }
       logAndBuffer(`ACR Score: ${acr}`);
 
@@ -729,6 +827,12 @@
     startBtn.disabled = true;
     startBtn.style.opacity = '0.5';
 
+    if (/[?&]debug\b/.test(location.search)) {   // add ?debug to the link to see which version / browser this is
+      const bi = document.getElementById('build-info');
+      bi.style.display = 'block';
+      bi.textContent = 'Build ' + BUILD_TAG + ' | ' + VIDEO_SET + ' | ' + navigator.userAgent;
+    }
+
     // Preload session 1 before the participant can press Start, then session 2 in the background.
     preloadSession(0).then(() => {
       startBtn.disabled = false;
@@ -741,7 +845,12 @@
       }
       if (NUM_SESSIONS > 1) {
         preloadSession(1).then(() => {
-          if (failedSrcs.size > 0) logAndBuffer('WARNING: could not preload: ' + Array.from(failedSrcs).join(', '));
+          if (failedSrcs.size > 0) {
+            logAndBuffer('WARNING: could not preload: ' + Array.from(failedSrcs).join(', '));
+            const w2 = document.getElementById('load-warning');
+            w2.style.display = 'block';
+            w2.innerHTML = 'Warning: could not preload ' + failedSrcs.size + ' file(s):<br>' + Array.from(failedSrcs).join('<br>');
+          }
         });
       }
     });
@@ -762,7 +871,10 @@
       logAndBuffer('User Age:', age);
       logAndBuffer('Experience (years):', exp);
       logAndBuffer('Device Name:', device);
-      logAndBuffer('Build: v3-baked-speed-quality');
+      logAndBuffer('Video Set:', VIDEO_SET);
+      logAndBuffer('Build:', BUILD_TAG);
+      logAndBuffer('User Agent:', navigator.userAgent);
+      logAndBuffer('Screen:', screen.width + 'x' + screen.height + ' @' + (window.devicePixelRatio || 1) + 'x, viewport ' + innerWidth + 'x' + innerHeight);
       plan.forEach((c, i) => {
         logAndBuffer(`PLAN ${i + 1}: S${c.session + 1} #${c.indexInSession + 1} video=${c.videoId} cond=${c.cond.id}`);
       });
@@ -784,7 +896,7 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `log_quality_stall_loss_speed_${safeName}_${dateStr}.txt`;
+      a.download = `log_quality_stall_loss_speed_${VIDEO_SET}_${safeName}_${dateStr}.txt`;
       a.click();
       URL.revokeObjectURL(url);
     };
