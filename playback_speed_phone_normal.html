@@ -131,8 +131,8 @@
     <button id="download-log-btn-finish" style="font-size:1.2rem;padding:12px 32px;border-radius:8px;border:none;background:#222;color:#fff;cursor:pointer;">Download Log</button>
     <div style="margin-top:32px;color:#fff;font-size:1.1rem;text-align:center;">
       Please upload your downloaded log file to:<br>
-      <a href="https://drive.google.com/drive/folders/1BRxLc0jS_SFxjNz3-JeL44CBwAL40OUX?usp=sharing" target="_blank" style="color:#4af;text-decoration:underline;">
-        https://drive.google.com/drive/folders/1BRxLc0jS_SFxjNz3-JeL44CBwAL40OUX?usp=sharing
+      <a href="https://drive.google.com/drive/folders/1zjsYvar1mtPHSSLkmkLd86HrTPxi_x91" target="_blank" style="color:#4af;text-decoration:underline;">
+        https://drive.google.com/drive/folders/1zjsYvar1mtPHSSLkmkLd86HrTPxi_x91
       </a>
     </div>
   </div>
@@ -174,6 +174,8 @@
     // Big session 1 = first 3 videos, big session 2 = last 3 videos.
     const VIDEO_IDS = [90, 111, 114, 112, 93, 154];   // -> files 91, 112, 115, 113, 94, 155
     const VIDEOS_PER_SESSION = 3;
+    // Tag written into the log and into the log file name, so the logs of the two links can be told apart.
+    const VIDEO_SET = "orig6";
 
     // Each source video is exactly 10 s: [0-3s] perfect | [3-7s] impaired | [7-10s] perfect
     const CLIP_DURATION = 10;
@@ -187,14 +189,15 @@
     const BASE_RES = "720p";
 
     // Factors tested in the 4 s middle part
-    const QUALITIES        = ["720p", "480p", "240p"];       // quality in the middle part
-    const STALL_TIMES      = [0.5, 1, 2];                    // seconds of freeze in the middle of the clip
+    const QUALITIES        = ["720p", "480p", "360p", "240p", "144p"]; // quality in the middle part
+    const STALL_TIMES      = [0.5, 1, 2, 4];                 // seconds of freeze in the middle of the clip
     const PLAYBACK_SPEEDS  = [0.9, 0.8, 0.7, 0.6, 0.5];     // speed in the middle part
 
     // NEW: packet-loss versions. The loss is already baked into the files (loss only in the middle 4 s).
-    // Files: LOSS_PATH + (videoId+1) + "_L" + level + ".mp4"   e.g. ./video_resolution/loss/91_L2.mp4
-    const LOSS_LEVELS  = [1, 2, 3];
-    const LOSS_NOMINAL = { 1: "0.1%", 2: "0.5%", 3: "1.0%" };  // nominal loss rate inside the lossy 4 s (only used for the log)
+    // Files: LOSS_PATH + (videoId+1) + "_L" + level + ".mp4"   e.g. ./video_resolution/loss/91_L0.mp4 (L0 = 0.05%)
+    // L0 = 0.05% (NEW), L1 = 0.1%, L2 = 0.5%, L3 = 1.0%.  NOTE: level 0 is a REAL loss level, so "no loss" is represented by null.
+    const LOSS_LEVELS  = [0, 1, 2, 3];
+    const LOSS_NOMINAL = { 0: "0.05%", 1: "0.1%", 2: "0.5%", 3: "1.0%" };  // nominal loss rate inside the lossy 4 s (only used for the log)
     const LOSS_PATH    = "./video_resolution/loss/";
 
     // Quality-switch clips are PRE-RENDERED as ONE file each (3 s 720p | 4 s low quality | 3 s 720p), so there is
@@ -211,7 +214,7 @@
     const SPEED_PATH = "./video_resolution/speed/";
 
     // NEW: start-up (initial buffering) delay when the video is opened: black screen + spinner, then the video plays normally
-    const STARTUP_DELAYS = [0.5, 1, 2];                       // seconds of black screen before the video starts
+    const STARTUP_DELAYS = [0.5, 1, 2, 4];                    // seconds of black screen before the video starts
 
     // Block every way a participant could interact with the playing clip (keys, context menu, double-tap, touch gestures)
     (function lockInteraction() {
@@ -249,7 +252,7 @@
 
     function buildConditions() {
       const c = [];
-      const base = { res: BASE_RES, speed: 1, stall: 0, startDelay: 0, loss: 0 };
+      const base = { res: BASE_RES, speed: 1, stall: 0, startDelay: 0, loss: null };  // loss: null = no packet loss
       QUALITIES.forEach(q => c.push(Object.assign({}, base, { id: `Q_${q}`, type: 'quality', res: q })));
       STALL_TIMES.forEach(t => c.push(Object.assign({}, base, { id: `T_${t}s`, type: 'stall', stall: t })));
       PLAYBACK_SPEEDS.forEach(p => c.push(Object.assign({}, base, { id: `P_${p}x`, type: 'speed', speed: p })));
@@ -270,7 +273,7 @@
 
     // Builds the ordered clip list of ONE big session:
     //  - the 3 videos rotate in a FIXED order (A,B,C,A,B,C,...) -> the same video is never played back-to-back
-    //  - the condition of each video is shuffled independently (each video gets all 18 conditions once)
+    //  - the condition of each video is shuffled independently (each video gets all 23 conditions once)
     //  - two consecutive clips never share the same condition either
     function buildSessionPlan(videoIds) {
       const conds = buildConditions();
@@ -417,8 +420,9 @@
     //            and is faded in on top of the base video during the middle 4 s.
     async function prepareClip(clip) {
       const cond = clip.cond;
-      let baked = USE_BAKED_QUALITY && !cond.loss && cond.res !== BASE_RES;
-      let bakedSpeed = USE_BAKED_SPEED && !cond.loss && cond.speed !== 1;
+      const isLoss = cond.loss !== null;   // loss level 0 (= 0.05%) is a real level: never test cond.loss for truthiness
+      let baked = USE_BAKED_QUALITY && !isLoss && cond.res !== BASE_RES;
+      let bakedSpeed = USE_BAKED_SPEED && !isLoss && cond.speed !== 1;
       let baseUrl;
       if (bakedSpeed) {
         const ss = speedSrc(clip.videoId, cond.speed);
@@ -427,7 +431,7 @@
           bakedSpeed = false;
           baseUrl = await fetchBlob(videoSrc(clip.videoId, BASE_RES));
         }
-      } else if (cond.loss) {
+      } else if (isLoss) {
         baseUrl = await fetchBlob(lossSrc(clip.videoId, cond.loss));
       } else if (baked) {
         const qs = qualSrc(clip.videoId, cond.res);
@@ -439,8 +443,8 @@
       } else {
         baseUrl = await fetchBlob(videoSrc(clip.videoId, BASE_RES));
       }
-      const needAlt = !baked && !cond.loss && cond.res !== BASE_RES;
-      clip.method = bakedSpeed ? 'baked-speed-file' : (cond.speed !== 1 && !cond.loss) ? 'RATE-FALLBACK' : cond.loss ? 'loss-file' : baked ? 'baked-single-file' : needAlt ? 'OVERLAY-FALLBACK' : 'single-file';
+      const needAlt = !baked && !isLoss && cond.res !== BASE_RES;
+      clip.method = bakedSpeed ? 'baked-speed-file' : (cond.speed !== 1 && !isLoss) ? 'RATE-FALLBACK' : isLoss ? 'loss-file' : baked ? 'baked-single-file' : needAlt ? 'OVERLAY-FALLBACK' : 'single-file';
       const altUrl = needAlt ? await fetchBlob(videoSrc(clip.videoId, cond.res)) : null;
 
       const el = document.createElement('div');
@@ -695,7 +699,7 @@
       logAndBuffer(`Stall Time: ${cond.stall}s`);
       logAndBuffer(`Startup Delay: ${cond.startDelay}s`);
       logAndBuffer(`Playback Method: ${clip.method || 'unknown'}`);
-      logAndBuffer(`Packet Loss Level: ${cond.loss ? 'L' + cond.loss + ' (nominal ' + LOSS_NOMINAL[cond.loss] + ')' : 'none'}`);
+      logAndBuffer(`Packet Loss Level: ${cond.loss !== null ? 'L' + cond.loss + ' (nominal ' + LOSS_NOMINAL[cond.loss] + ')' : 'none'}`);
       logAndBuffer(`Planned Watch Time: ${plannedDuration(cond).toFixed(2)}s`);
       if (lastStats) {
         logAndBuffer(`Actual Watch Time: ${lastStats.watchSec.toFixed(2)}s`);
@@ -740,7 +744,12 @@
       }
       if (NUM_SESSIONS > 1) {
         preloadSession(1).then(() => {
-          if (failedSrcs.size > 0) logAndBuffer('WARNING: could not preload: ' + Array.from(failedSrcs).join(', '));
+          if (failedSrcs.size > 0) {
+            logAndBuffer('WARNING: could not preload: ' + Array.from(failedSrcs).join(', '));
+            const w2 = document.getElementById('load-warning');
+            w2.style.display = 'block';
+            w2.innerHTML = 'Warning: could not preload ' + failedSrcs.size + ' file(s):<br>' + Array.from(failedSrcs).join('<br>');
+          }
         });
       }
     });
@@ -761,6 +770,7 @@
       logAndBuffer('User Age:', age);
       logAndBuffer('Experience (years):', exp);
       logAndBuffer('Device Name:', device);
+      logAndBuffer('Video Set:', VIDEO_SET);
       plan.forEach((c, i) => {
         logAndBuffer(`PLAN ${i + 1}: S${c.session + 1} #${c.indexInSession + 1} video=${c.videoId} cond=${c.cond.id}`);
       });
@@ -782,7 +792,7 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `log_quality_stall_loss_speed_${safeName}_${dateStr}.txt`;
+      a.download = `log_quality_stall_loss_speed_${VIDEO_SET}_${safeName}_${dateStr}.txt`;
       a.click();
       URL.revokeObjectURL(url);
     };
